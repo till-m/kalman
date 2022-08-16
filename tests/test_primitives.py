@@ -4,7 +4,6 @@ from pytest import approx, raises
 
 from .utils import add_noise, example5_params, example9_params, random_covariance_matrix
 
-from icecream import ic
 
 def test_KalmanParams():
     _, params = example5_params()
