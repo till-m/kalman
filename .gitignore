@@ -1,0 +1,6 @@
+.ipynb_checkpoints/
+.pytest_cache/
+.vscode/
+build/
+**.egg-info
+.coverage
