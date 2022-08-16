@@ -62,98 +62,84 @@ def predict_step(y_est_prev, A, B):
 
     return y_pred, x_pred
 
+def smooth_step(y_t_tau_prev, P_t_tau_prev, y_pred, y_pred_cov, y_est_prev, P_est_prev, A, estimate_covs=True):
+    P_inv = np.linalg.inv(y_pred_cov)
+    J = P_est_prev @ A.T @ P_inv
+    y_t_tau = (y_est_prev +
+                        J @ (y_t_tau_prev - y_pred))
+    if estimate_covs:
+        y_t_tau_cov = (
+            P_est_prev +
+            J @ (P_t_tau_prev - y_pred_cov) @ J.T)
+    
+        return y_t_tau, y_t_tau_cov, J
+    
+    return y_t_tau, J
+    
 
 class KalmanModel():
     # Using Max Welling's notation
     def __init__(self, verbose=False) -> None:
         self.verbose = verbose
 
-    def set_params(self, params: Union[KalmanParams, Dict]):
-        if isinstance(params, KalmanParams):
-            self.params = copy.deepcopy(params)
-        else:
-            self.params = KalmanParams(**params)
+    def set_params(self, X: np.ndarray, params: KalmanParams):
+        self.params = copy.deepcopy(params)
 
-    def fit(
-        self,
-        X: np.ndarray,
-        d: int,
-        init_params,
-        t_end=None,
-        predict_params=False,
-        n_it=10,
-    ):
         self.X = X
         self.tau = X.shape[0]
-        self.d = d
+        self.d = self.params.mu.size
         self.k = X.shape[-1]
 
         self.calculate_filter_cov = True
-        self.P_t_t1_estimated = False
+        self.calculate_smooth_cov = True
 
+    def fit(
+        self,
+        mode='estimate',
+        n_it=10,
+    ):
         self.P_t_tau_estimated = False
 
-        if t_end is None:
-            t_end = self.tau
-
-        self.t_end = t_end
-        self.set_params(init_params)
-
-        if t_end > self.tau:
-            raise NotImplementedError("Prediction not implemented")
-
-        for _ in range(n_it):
-            if t_end <= self.tau:
+        if mode == 'filter':
+            self.filter()
+            return self.y_t_t, self.P_t_t
+        elif mode == 'smooth':
+            self.filter()
+            self.smooth()
+            return self.y_t_tau, self.P_t_tau
+        elif mode == 'estimate':
+            for _ in range(n_it):
                 self.filter()
                 self.smooth()
-            if predict_params:
+                
                 self.lag_one_covar_smoother()
                 self.e_step()
                 if self.verbose:
                     print(self.loglikelihood())
-            else:
-                break
-        else:
             self.filter()
             self.smooth()
+            return self.y_t_tau, self.P_t_tau
 
-    def filter(self, t_end_filter=None):
+
+    def filter(self):
         # Initialize the filter & perform 0-th step.
+        K = np.zeros(shape=(self.tau, self.d, self.k))
 
-        if t_end_filter is None:
-            t_end_filter = self.tau
-
-        K = np.zeros(shape=(t_end_filter, self.d, self.k))
-
-        y_t_t = np.zeros(shape=(t_end_filter, self.d))
+        y_t_t = np.zeros(shape=(self.tau, self.d))
 
         if self.calculate_filter_cov:
-            P_t_t = np.zeros(shape=(t_end_filter, self.d, self.d))
+            P_t_t = np.zeros(shape=(self.tau, self.d, self.d))
+            # P_t^t-1 -- has offset of 2, i.e. K[t] = K_(t+1)
+            P_t_t1 = np.zeros(shape=(self.tau, self.d, self.d))
+            P_t_t1[0] = self.params.Sigma
         else:
             P_t_t = self.P_t_t
+            P_t_t1 = self.P_t_t1
 
         # y_hat_t^t-1 -- has offset of 2, i.e. K[t] = K_(t+1)
-        y_t_t1 = np.zeros(shape=(t_end_filter, self.d))
+        y_t_t1 = np.zeros(shape=(self.tau, self.d))
         
-        try:
-            y_t_t1[0] = np.linalg.solve(self.params.B, self.X[0])
-            ic("solve worked")
-        except np.linalg.LinAlgError:
-            try:
-                y_t_t1[0], _, _, _ = np.linalg.lstsq(self.params.B, self.X[0], rcond=None)
-                ic("lstsq worked")
-                ic(y_t_t1[0])
-            except np.linalg.LinAlgError:
-                y_t_t1[0] = self.params.mu
-                ic("Nothing worked, using mu.")
-
-
-        if self.P_t_t1_estimated:
-            P_t_t1 = self.P_t_t1
-        else:
-            # P_t^t-1 -- has offset of 2, i.e. K[t] = K_(t+1)
-            P_t_t1 = np.zeros(shape=(t_end_filter, self.d, self.d))
-            P_t_t1[0] = self.params.Sigma
+        y_t_t1[0] = self.params.mu
 
         K[0] = P_t_t1[0] @ self.params.B.T @ np.linalg.inv(
             self.params.R + self.params.B @ P_t_t1[0] @ self.params.B.T)
@@ -168,7 +154,7 @@ class KalmanModel():
         y_t_t[0] = y_t_t1[0] + K[0] @ (self.X[0] - self.params.B @ y_t_t1[0])
 
         # incrementally advance filter.
-        for t in range(1, t_end_filter):
+        for t in range(1, self.tau):
             if self.calculate_filter_cov:
                 y_t_t1[t], P_t_t1[t], K[t], y_t_t[t], P_t_t[t] = filter_step(
                     self.X[t],
@@ -203,51 +189,62 @@ class KalmanModel():
 
         return y_t_t, P_t_t, y_t_t1, P_t_t1, K
 
-    def smooth(self, t_end_smooth=None):
-        if t_end_smooth is None:
-            t_end_smooth = 0
-
-        if self.P_t_tau_estimated:
-            P_t_tau = self.P_t_tau
-        else:
+    def smooth(self):
+        if self.calculate_smooth_cov:
             # P_t-1^tau
-            P_t_tau = np.zeros((self.tau - t_end_smooth, self.d, self.d))
+            P_t_tau = np.zeros((self.tau, self.d, self.d))
             P_t_tau[-1] = self.P_t_t[-1]
+        else:
+            P_t_tau = self.P_t_tau
+
 
         # y_hat_t^tau
-        y_t_tau = np.zeros((self.tau - t_end_smooth, self.d))
+        y_t_tau = np.zeros((self.tau, self.d))
         y_t_tau[-1] = self.y_t_t[-1]
 
         # J_t
-        J = np.zeros((self.tau - t_end_smooth - 1, self.d, self.d))
+        J = np.zeros((self.tau - 1, self.d, self.d))
 
-        for t in range(1, self.tau - t_end_smooth):
-            P_inv = np.linalg.inv(self.P_t_t1[-t])
-            J[-t] = self.P_t_t[-t - 1] @ self.params.A.T @ P_inv
-            y_t_tau[-t - 1] = (self.y_t_t[-t - 1] +
-                               J[-t] @ (y_t_tau[-t] - self.y_t_t1[-t]))
-            if not self.P_t_tau_estimated:
-                P_t_tau[-t - 1] = (
-                    self.P_t_t[-t - 1] +
-                    J[-t] @ (P_t_tau[-t] - self.P_t_t1[-t]) @ J[-t].T)
+        for t in range(1, self.tau):
+            if self.calculate_filter_cov:
+                y_t_tau[-t - 1], P_t_tau[-t - 1], J[-t] = smooth_step(
+                    y_t_tau[-t],
+                    P_t_tau[-1],
+                    self.y_t_t1[-t],
+                    self.P_t_t1[-t],
+                    self.y_t_t[-t - 1],
+                    self.P_t_t[-t - 1],
+                    self.params.A
+                )
+            else:
+                y_t_tau[-t - 1], J[-t] = smooth_step(
+                    y_t_tau[-t],
+                    P_t_tau[-1],
+                    self.y_t_t1[-t],
+                    self.P_t_t1[-t],
+                    self.y_t_t[-t - 1],
+                    self.P_t_t[-t - 1],
+                    self.params.A,
+                    False
+                )
+        
         self.y_t_tau = y_t_tau
 
-        if not self.P_t_tau_estimated:
-            self.P_t_tau_estimated = True
+        if self.calculate_smooth_cov:
+            self.calculate_smooth_cov = False
             self.P_t_tau = P_t_tau
         self.J = J
 
         return y_t_tau, P_t_tau, J
 
-    def lag_one_covar_smoother(self, t_end_smooth=None):
-        if t_end_smooth is None:
-            t_end_smooth = 0
+
+    def lag_one_covar_smoother(self):
         # P_(t)(t-1)^tau
-        P_tt1_tau = np.zeros((self.tau - t_end_smooth - 1, self.d, self.d))
+        P_tt1_tau = np.zeros((self.tau - 1, self.d, self.d))
         P_tt1_tau[-1] = (np.eye(self.d) - self.K[-1] @ self.params.B
                          ) @ self.params.A @ self.P_t_t[-1]
 
-        for t in range(1, self.tau - t_end_smooth - 1):
+        for t in range(1, self.tau - 1):
             P_tt1_tau[-t -
                       1] = (self.P_t_tau[-t] @ self.J[-t - 1].T +
                             self.J[-t] @ (P_tt1_tau[-t] -
@@ -257,6 +254,7 @@ class KalmanModel():
         self.P_tt1_tau = P_tt1_tau
 
         return P_tt1_tau
+
 
     def e_step(self):
         M_0 = np.zeros(self.P_t_tau.shape)
@@ -297,8 +295,7 @@ class KalmanModel():
         self.params.B = B_new
         self.params.R = R_new
 
-        self.P_t_t_estimated = False
-        self.P_t_t1_estimated = False
+        self.calculate_filter_cov = False
         self.P_t_tau_estimated = False
 
         return mu_new, Sigma_new, A_new, Q_new, B_new, R_new
