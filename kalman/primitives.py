@@ -1,7 +1,7 @@
 from typing import Type
 import numpy as np
 from scipy.stats import multivariate_normal
-from icecream import ic
+
 def multivar_normal_loglikelihood(X, X_est, X_est_cov):
     res = 0
     for t in range(0, X.shape[0]):
