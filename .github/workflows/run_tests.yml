@@ -17,17 +17,6 @@ jobs:
       matrix:
         os: ["ubuntu-latest", "windows-latest", "macos-latest"]
         python-version: ["3.6", "3.7", "3.8", "3.9"]
-        pandas-version: ["1.3", "1.4", ""]
-        exclude:
-          - python-version: "3.6"
-            pandas-version: "1.3"
-          - python-version: "3.6"
-            pandas-version: "1.4"
-          - python-version: "3.7"
-            pandas-version: "1.3"
-          - python-version: "3.7"
-            pandas-version: "1.4"
-
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python ${{ matrix.python-version }}
@@ -40,9 +29,6 @@ jobs:
         pip install pytest
         pip install pytest-cov
         pip install -e .
-    - name: Replace with specific pandas version (${{ matrix.pandas-version }})
-      if: ${{ matrix.pandas-version }}
-      run: pip install pandas==${{ matrix.pandas-version }}
     - name: Test with pytest
       run: |
         pytest --cov=kalman --cov-report term-missing
