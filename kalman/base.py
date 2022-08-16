@@ -5,6 +5,7 @@ from scipy.stats import multivariate_normal
 from icecream import ic
 import copy
 
+
 class KalmanParams():
 
     def __init__(self, *args, **kwargs):
@@ -27,6 +28,39 @@ class KalmanParams():
     @property
     def n_params(self):
         return self.mu.size + self.Sigma.size + self.B.size + self.R.size + self.A.size + self.Q.size
+
+
+def filter_step(x, y_est_prev, P_est_prev, A, Q, B, R, estimate_covs=True, y_pred_cov=None, y_est_cov=None):
+    """
+    Performs one full step of Kalman filtering.
+    """
+    y_pred = A @ y_est_prev
+
+    if estimate_covs:
+        y_pred_cov = A @ P_est_prev @ A.T + Q
+
+    kalman_gain = y_pred_cov @ B.T @ np.linalg.inv(R + B @ y_pred_cov @ B.T)
+    T = (np.eye(kalman_gain.shape[0]) - kalman_gain @ B)
+
+    if estimate_covs:
+        y_est_cov = T @ y_pred_cov @ T.T + kalman_gain @ R @ kalman_gain.T
+
+    y_est = y_pred + kalman_gain @ (x - B @ y_pred)
+
+    if estimate_covs:
+        return y_pred, y_pred_cov, kalman_gain, y_est, y_est_cov
+
+    return y_pred, kalman_gain, y_est
+
+
+def predict_step(y_est_prev, A, B):
+    """
+    Predicts the next state and observation based on the last filtered estimate.
+    """
+    y_pred = A @ y_est_prev
+    x_pred = B @ y_pred
+
+    return y_pred, x_pred
 
 
 class KalmanModel():
@@ -54,7 +88,7 @@ class KalmanModel():
         self.d = d
         self.k = X.shape[-1]
 
-        self.P_t_t_estimated = False
+        self.calculate_filter_cov = True
         self.P_t_t1_estimated = False
 
         self.P_t_tau_estimated = False
@@ -84,6 +118,8 @@ class KalmanModel():
             self.smooth()
 
     def filter(self, t_end_filter=None):
+        # Initialize the filter & perform 0-th step.
+
         if t_end_filter is None:
             t_end_filter = self.tau
 
@@ -91,56 +127,77 @@ class KalmanModel():
 
         y_t_t = np.zeros(shape=(t_end_filter, self.d))
 
-        if self.P_t_t_estimated:
-            P_t_t = self.P_t_t
-        else:
+        if self.calculate_filter_cov:
             P_t_t = np.zeros(shape=(t_end_filter, self.d, self.d))
+        else:
+            P_t_t = self.P_t_t
 
-        for t in range(t_end_filter):
-            if t == 0:
-                # y_hat_t^t-1 -- has offset of 2, i.e. K[t] = K_(t+1)
-                y_t_t1 = np.zeros(shape=(t_end_filter, self.d))
+        # y_hat_t^t-1 -- has offset of 2, i.e. K[t] = K_(t+1)
+        y_t_t1 = np.zeros(shape=(t_end_filter, self.d))
+        
+        try:
+            y_t_t1[0] = np.linalg.solve(self.params.B, self.X[0])
+            ic("solve worked")
+        except np.linalg.LinAlgError:
+            try:
+                y_t_t1[0], _, _, _ = np.linalg.lstsq(self.params.B, self.X[0], rcond=None)
+                ic("lstsq worked")
+                ic(y_t_t1[0])
+            except np.linalg.LinAlgError:
                 y_t_t1[0] = self.params.mu
+                ic("Nothing worked, using mu.")
 
-                if self.P_t_t1_estimated:
-                    P_t_t1 = self.P_t_t1
-                else:
-                    # P_t^t-1 -- has offset of 2, i.e. K[t] = K_(t+1)
-                    P_t_t1 = np.zeros(shape=(t_end_filter, self.d, self.d))
-                    P_t_t1[0] = self.params.Sigma
 
+        if self.P_t_t1_estimated:
+            P_t_t1 = self.P_t_t1
+        else:
+            # P_t^t-1 -- has offset of 2, i.e. K[t] = K_(t+1)
+            P_t_t1 = np.zeros(shape=(t_end_filter, self.d, self.d))
+            P_t_t1[0] = self.params.Sigma
+
+        K[0] = P_t_t1[0] @ self.params.B.T @ np.linalg.inv(
+            self.params.R + self.params.B @ P_t_t1[0] @ self.params.B.T)
+
+        # P_t^t (numerically stable version)
+        T = (np.eye(K[0].shape[0]) - K[0] @ self.params.B)
+
+        if self.calculate_filter_cov:
+            P_t_t[0] = T @ P_t_t1[0] @ T.T + K[0] @ self.params.R @ K[0].T
+
+        # y_hat_t^t
+        y_t_t[0] = y_t_t1[0] + K[0] @ (self.X[0] - self.params.B @ y_t_t1[0])
+
+        # incrementally advance filter.
+        
+        for t in range(1, t_end_filter):
+            if self.calculate_filter_cov:
+                y_t_t1[t], P_t_t1[t], K[t], y_t_t[t], P_t_t[t] = filter_step(
+                    self.X[t],
+                    y_t_t[t - 1],
+                    P_t_t[t - 1],
+                    self.params.A,
+                    self.params.Q,
+                    self.params.B,
+                    self.params.R)
             else:
-                # y_hat_t-0^t-1
-                y_t_t1[t] = self.params.A @ y_t_t[t - 1]
-
-                if not self.P_t_t1_estimated:
-                    # P_t-0^t-1
-                    P_t_t1[t] = self.params.A @ P_t_t[
-                        t - 1] @ self.params.A.T + self.params.Q
-
-            K[t] = P_t_t1[t] @ self.params.B.T @ np.linalg.inv(
-                self.params.R + self.params.B @ P_t_t1[t] @ self.params.B.T)
-            # P_t^t (numerically stable version)
-            T = (np.eye(K[t].shape[0]) - K[t] @ self.params.B)
-
-            if not self.P_t_t_estimated:
-                P_t_t[t] = T @ P_t_t1[t] @ T.T + K[t] @ self.params.R @ K[t].T
-
-            # y_hat_t^t
-            y_t_t[t] = y_t_t1[t] + K[t] @ (self.X[t] -
-                                           self.params.B @ y_t_t1[t])
-
-        if not self.P_t_t1_estimated:
-            self.P_t_t1_estimated = True
+                y_t_t1[t], K[t], y_t_t[t] = filter_step(
+                    self.X[t], 
+                    y_t_t[t - 1],
+                    P_t_t[t - 1],
+                    self.params.A,
+                    self.params.Q,
+                    self.params.B,
+                    self.params.R,
+                    estimate_covs=False,
+                    y_pred_cov=P_t_t1[t],
+                    y_est_cov=P_t_t[t],)
+        if self.calculate_filter_cov:
+            self.calculate_filter_cov = False
             self.P_t_t1 = P_t_t1
+            self.P_t_t = P_t_t
 
         self.y_t_t = y_t_t
         self.K = K
-
-        if not self.P_t_t_estimated:
-            self.P_t_t_estimated = True
-            self.P_t_t = P_t_t
-
         self.y_t_t1 = y_t_t1
 
         return y_t_t, P_t_t, y_t_t1, P_t_t1, K
