@@ -1,18 +1,54 @@
+from cmath import isfinite
+from typing import Dict, Union
 import numpy as np
 from scipy.stats import multivariate_normal
+from icecream import ic
+import copy
+
+class KalmanParams():
+
+    def __init__(self, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], dict):
+            self.init_from_dict(args[0])
+        else:
+            self.init_from_kwargs(**kwargs)
+
+    def init_from_dict(self, init_dict):
+        self.init_from_kwargs(**init_dict)
+
+    def init_from_kwargs(self, **kwargs):
+        self.mu = kwargs['mu']
+        self.Sigma = kwargs['Sigma']
+        self.B = kwargs['B']
+        self.R = kwargs['R']
+        self.A = kwargs['A']
+        self.Q = kwargs['Q']
+
+    @property
+    def n_params(self):
+        return self.mu.size + self.Sigma.size + self.B.size + self.R.size + self.A.size + self.Q.size
+
 
 class KalmanModel():
     # Using Max Welling's notation
-    def __init__(self) -> None:
-        pass
+    def __init__(self, verbose=False) -> None:
+        self.verbose = verbose
 
-    def fit(self,
-            X,
-            d: int,
-            t_end=None,
-            predict_params=False,
-            n_it=10,
-            initialize_kwargs={}):
+    def set_params(self, params: Union[KalmanParams, Dict]):
+        if isinstance(params, KalmanParams):
+            self.params = copy.deepcopy(params)
+        else:
+            self.params = KalmanParams(**params)
+
+    def fit(
+        self,
+        X: np.ndarray,
+        d: int,
+        init_params,
+        t_end=None,
+        predict_params=False,
+        n_it=10,
+    ):
         self.X = X
         self.tau = X.shape[0]
         self.d = d
@@ -27,33 +63,25 @@ class KalmanModel():
             t_end = self.tau
 
         self.t_end = t_end
-        self.initialize(**initialize_kwargs)
+        self.set_params(init_params)
 
         if t_end > self.tau:
             raise NotImplementedError("Prediction not implemented")
 
         for _ in range(n_it):
-            if t_end < self.tau:
+            if t_end <= self.tau:
                 self.filter()
                 self.smooth()
-                #print(self.loglikelihood())
             if predict_params:
                 self.lag_one_covar_smoother()
                 self.e_step()
-                #print(self.loglikelihood())
+                if self.verbose:
+                    print(self.loglikelihood())
             else:
                 break
         else:
             self.filter()
             self.smooth()
-
-    def initialize(self, mu=None, Sigma=None, B=None, R=None, A=None, Q=None):
-        self.mu = mu
-        self.Sigma = Sigma
-        self.B = B
-        self.R = R
-        self.A = A
-        self.Q = Q
 
     def filter(self, t_end_filter=None):
         if t_end_filter is None:
@@ -72,34 +100,35 @@ class KalmanModel():
             if t == 0:
                 # y_hat_t^t-1 -- has offset of 2, i.e. K[t] = K_(t+1)
                 y_t_t1 = np.zeros(shape=(t_end_filter, self.d))
-                y_t_t1[0] = self.mu
+                y_t_t1[0] = self.params.mu
 
                 if self.P_t_t1_estimated:
                     P_t_t1 = self.P_t_t1
                 else:
                     # P_t^t-1 -- has offset of 2, i.e. K[t] = K_(t+1)
                     P_t_t1 = np.zeros(shape=(t_end_filter, self.d, self.d))
-                    P_t_t1[0] = self.Sigma
+                    P_t_t1[0] = self.params.Sigma
 
             else:
                 # y_hat_t-0^t-1
-                y_t_t1[t] = self.A @ y_t_t[t - 1]
+                y_t_t1[t] = self.params.A @ y_t_t[t - 1]
 
                 if not self.P_t_t1_estimated:
                     # P_t-0^t-1
-                    P_t_t1[t] = self.A @ P_t_t[t - 1] @ self.A.T + self.Q
+                    P_t_t1[t] = self.params.A @ P_t_t[
+                        t - 1] @ self.params.A.T + self.params.Q
 
-            K[t] = P_t_t1[t] @ self.B.T @ np.linalg.inv(
-                self.R + self.B @ P_t_t1[t] @ self.B.T)
+            K[t] = P_t_t1[t] @ self.params.B.T @ np.linalg.inv(
+                self.params.R + self.params.B @ P_t_t1[t] @ self.params.B.T)
             # P_t^t (numerically stable version)
-            T = (np.eye(K[t].shape[0]) - K[t] @ self.B)
+            T = (np.eye(K[t].shape[0]) - K[t] @ self.params.B)
 
             if not self.P_t_t_estimated:
-                P_t_t[t] = T @ P_t_t1[t] @ T.T + K[t] @ self.R @ K[t].T
+                P_t_t[t] = T @ P_t_t1[t] @ T.T + K[t] @ self.params.R @ K[t].T
 
             # y_hat_t^t
             y_t_t[t] = y_t_t1[t] + K[t] @ (self.X[t] -
-                                             self.B @ y_t_t1[t])
+                                           self.params.B @ y_t_t1[t])
 
         if not self.P_t_t1_estimated:
             self.P_t_t1_estimated = True
@@ -136,12 +165,13 @@ class KalmanModel():
 
         for t in range(1, self.tau - t_end_smooth):
             P_inv = np.linalg.inv(self.P_t_t1[-t])
-            J[-t] = self.P_t_t[-t-1] @ self.A.T @ P_inv
+            J[-t] = self.P_t_t[-t - 1] @ self.params.A.T @ P_inv
             y_t_tau[-t - 1] = (self.y_t_t[-t - 1] +
                                J[-t] @ (y_t_tau[-t] - self.y_t_t1[-t]))
             if not self.P_t_tau_estimated:
-                P_t_tau[-t - 1] = (self.P_t_t[-t-1] +
-                            J[-t] @ (P_t_tau[-t] - self.P_t_t1[-t]) @ J[-t].T)
+                P_t_tau[-t - 1] = (
+                    self.P_t_t[-t - 1] +
+                    J[-t] @ (P_t_tau[-t] - self.P_t_t1[-t]) @ J[-t].T)
         self.y_t_tau = y_t_tau
 
         if not self.P_t_tau_estimated:
@@ -151,16 +181,20 @@ class KalmanModel():
 
         return y_t_tau, P_t_tau, J
 
-    def lag_one_covar_smoother(self, t_end_smooth=0):
+    def lag_one_covar_smoother(self, t_end_smooth=None):
+        if t_end_smooth is None:
+            t_end_smooth = 0
         # P_(t)(t-1)^tau
         P_tt1_tau = np.zeros((self.tau - t_end_smooth - 1, self.d, self.d))
-        P_tt1_tau[-1] = (np.eye(self.d) -
-                       self.K[-1] @ self.B) @ self.A @ self.P_t_t[-1]
+        P_tt1_tau[-1] = (np.eye(self.d) - self.K[-1] @ self.params.B
+                         ) @ self.params.A @ self.P_t_t[-1]
 
         for t in range(1, self.tau - t_end_smooth - 1):
-            P_tt1_tau[-t - 1] = (
-                self.P_t_tau[-t] @ self.J[-t - 1].T + self.J[-t]
-                @ (P_tt1_tau[-t] - self.A @ self.P_t_t[-t - 1]) @ self.J[-t - 1].T)
+            P_tt1_tau[-t -
+                      1] = (self.P_t_tau[-t] @ self.J[-t - 1].T +
+                            self.J[-t] @ (P_tt1_tau[-t] -
+                                          self.params.A @ self.P_t_t[-t - 1])
+                            @ self.J[-t - 1].T)
 
         self.P_tt1_tau = P_tt1_tau
 
@@ -174,7 +208,8 @@ class KalmanModel():
             raise RuntimeError
 
         for i in range(M_0.shape[0]):
-            M_0[i] = self.P_t_tau[i] + np.outer(self.y_t_tau[i], self.y_t_tau[i])
+            M_0[i] = self.P_t_tau[i] + np.outer(self.y_t_tau[i],
+                                                self.y_t_tau[i])
             if i >= 1:
                 M_1[i - 1] = self.P_tt1_tau[i - 1] + np.outer(
                     self.y_t_tau[i], self.y_t_tau[i - 1])
@@ -196,12 +231,13 @@ class KalmanModel():
                       np.einsum('...i,...j->...ij', self.y_t_tau, self.X)))
         R_new = np.mean(R_new, axis=0)
 
-        self.mu = mu_new
-        self.Sigma = Sigma_new
-        self.A = A_new
-        self.Q = Q_new
-        self.B = B_new
-        self.R = R_new
+        self.params.mu = mu_new
+        self.params.Sigma = Sigma_new
+        ic(A_new)
+        self.params.A = A_new
+        self.params.Q = Q_new
+        self.params.B = B_new
+        self.params.R = R_new
 
         self.P_t_t_estimated = False
         self.P_t_t1_estimated = False
@@ -210,12 +246,13 @@ class KalmanModel():
         return mu_new, Sigma_new, A_new, Q_new, B_new, R_new
 
     def loglikelihood(self):
-        x_hat_1 = np.einsum('ij,...j->...i', self.B, self.y_t_t1)
-        x_hat_01 = self.B @ self.mu
+        x_hat_1 = np.einsum('ij,...j->...i', self.params.B, self.y_t_t1)
+        x_hat_01 = self.params.B @ self.params.mu
 
-        H_1 = self.R + self.B @ np.einsum('...ij,jk->...ik', self.P_t_t1[1:],
-                                          self.B.T)
-        H_01 = self.R + self.B @ self.Sigma @ self.B.T
+        H_1 = self.params.R + self.params.B @ np.einsum(
+            '...ij,jk->...ik', self.P_t_t1[1:], self.params.B.T)
+
+        H_01 = self.params.R + self.params.B @ self.params.Sigma @ self.params.B.T
 
         res = np.log(
             multivariate_normal(mean=x_hat_01, cov=H_01).pdf(self.X[0]))
