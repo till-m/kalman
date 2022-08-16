@@ -1,9 +1,69 @@
 import numpy as np
 import kalman
+import copy
+from scipy.stats import ortho_group
+
+
+def random_covariance_matrix(size, random_state=None):
+    lam = np.random.rand(size)
+    q = ortho_group(dim=size).rvs(random_state=random_state)
+    return q @ np.diag(lam) @ q.T
+
+
+def noisify_covariance_matrix(cov, rel, random_state=None):
+    size = cov.shape[0]
+    if size == 1 :
+        sign = np.sign(np.random.rand() - 0.5) 
+        return cov + sign * np.random.rand(size) * np.abs(cov) * rel
+    else:
+        mag = np.linalg.det(cov)
+
+        rcov = random_covariance_matrix(cov.shape[0])
+        scale = (mag/np.linalg.det(rcov) * rel)**(1/size) # size root due to multilinearity of determinant.
+
+        rcov = rcov * scale
+
+        return cov + rcov
+
+def noisify_array(arr, rel, random_state=None):
+    scale = (np.max(arr) - np.min(arr)) * rel
+    if scale == 0:
+        scale = np.max(arr) * rel
+    rarr = np.random.normal(size=arr.shape, loc=0, scale=scale)
+    return arr + rarr
+
+def add_noise(params: kalman.KalmanParams, random_state=None, rel=1e-2):
+    if random_state is not None:
+        np.random.seed(random_state)
+
+    noisy_params = copy.deepcopy(params)
+
+    noisy_params.A = noisify_array(noisy_params.A, rel=rel, random_state=random_state)
+    noisy_params.B = noisify_array(noisy_params.B, rel=rel,  random_state=random_state)
+    noisy_params.mu = noisify_array(noisy_params.mu, rel=rel,  random_state=random_state)
+
+    noisy_params.Sigma = noisify_covariance_matrix(
+        noisy_params.Sigma,
+        rel=rel,
+        random_state=random_state
+    )
+    noisy_params.Q = noisify_covariance_matrix(
+        noisy_params.Q,
+        rel=rel,
+        random_state=random_state
+    )
+    noisy_params.R = noisify_covariance_matrix(
+        noisy_params.R,
+        rel=rel,
+        random_state=random_state
+    )
+
+    return noisy_params
+
 
 def example5_params():
     # Example 5 from https://www.kalmanfilter.net/kalman1d.html
-    X = np.array([48.54, 47.11, 55.01, 55.15, 49.89, 40.85, 46.72, 50.05, 51.27, 49.95])
+    X = np.array([48.54, 47.11, 55.01, 55.15, 49.89, 40.85, 46.72, 50.05, 51.27, 49.95]).reshape((-1, 1))
 
     params = kalman.KalmanParams(
         mu=np.array([60.]),
@@ -15,10 +75,12 @@ def example5_params():
     )
 
     return X, params
+
+
 def example9_params():
     # Example 9 from https://www.kalmanfilter.net/multiExamples.html
     X = np.array([
-        [-393.66,  300.4 ],
+       [-393.66,  300.4 ],
        [-375.93,  301.78],
        [-351.04,  295.1 ],
        [-328.96,  305.19],
