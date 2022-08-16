@@ -1,12 +1,8 @@
-from random import random
 import simdkalman
 
 import numpy as np
 import kalman
-from scipy.stats import multivariate_normal
-import matplotlib.pyplot as plt
 from pytest import approx, raises
-from icecream import ic
 
 from .utils import add_noise, example5_params, example9_params
 
