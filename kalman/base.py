@@ -168,7 +168,6 @@ class KalmanModel():
         y_t_t[0] = y_t_t1[0] + K[0] @ (self.X[0] - self.params.B @ y_t_t1[0])
 
         # incrementally advance filter.
-        
         for t in range(1, t_end_filter):
             if self.calculate_filter_cov:
                 y_t_t1[t], P_t_t1[t], K[t], y_t_t[t], P_t_t[t] = filter_step(
@@ -191,6 +190,8 @@ class KalmanModel():
                     estimate_covs=False,
                     y_pred_cov=P_t_t1[t],
                     y_est_cov=P_t_t[t],)
+
+        # store results
         if self.calculate_filter_cov:
             self.calculate_filter_cov = False
             self.P_t_t1 = P_t_t1
