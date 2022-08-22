@@ -2,9 +2,9 @@ import simdkalman
 
 import numpy as np
 import kalman
-from pytest import approx, raises
+from pytest import approx
 
-from .utils import add_noise, example5_params, example9_params
+from .utils import add_noise, example9_params
 
 RANDOM_STATE = 12
 np.random.seed(RANDOM_STATE)

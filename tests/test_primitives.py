@@ -86,11 +86,13 @@ def test_smooth_step_static_no_noise():
 
     # smooth
     for i in range(len(X) - 1):
-        y_t_tau, y_t_tau_cov, _ = kalman.smooth_step(y_t_tau, y_t_tau_cov,
+        y_t_tau, y_t_tau_cov, _ = kalman.smooth_step(y_t_tau,
+                                                     y_t_tau_cov,
                                                      y_t_t1[-i - 2],
                                                      P_t_t1[-i - 2],
                                                      y_t_t[-i - 1],
-                                                     P_t_t[-i - 1], params.A)
+                                                     P_t_t[-i - 1],
+                                                     params.A)
         y_est_hat.insert(0, y_t_tau)
         P_est_hat.insert(0, y_t_tau_cov)
 

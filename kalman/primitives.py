@@ -1,12 +1,21 @@
-from typing import Type
 import numpy as np
 from scipy.stats import multivariate_normal
+from icecream import ic
+
+
+is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
 def multivar_normal_loglikelihood(X, X_est, X_est_cov):
     res = 0
     for t in range(0, X.shape[0]):
         res += np.log(multivariate_normal(mean=X_est[t], cov=X_est_cov[t]).pdf(X[t]))
     return res
+
+def matmul_inv(A, B):
+    """ Calculates A @ B^(-1) in a numerically stable manner.
+    """
+    r = np.linalg.solve(B.T, A.T)
+    return r.T
 
 class KalmanParams():
     """
@@ -106,7 +115,7 @@ def filter_step(x, y_est_prev, P_est_prev, A, Q, B, R, estimate_covs=True, y_pre
     if estimate_covs:
         y_pred_cov = A @ P_est_prev @ A.T + Q
 
-    kalman_gain = y_pred_cov @ B.T @ np.linalg.inv(R + B @ y_pred_cov @ B.T)
+    kalman_gain = y_pred_cov @ matmul_inv(B.T, R + B @ y_pred_cov @ B.T)
     T = (np.eye(kalman_gain.shape[0]) - kalman_gain @ B)
 
     if estimate_covs:
@@ -165,14 +174,17 @@ def smooth_step(y_t_tau_prev, P_t_tau_prev, y_pred, y_pred_cov, y_est_prev, P_es
 
         P_t_tau_prev: If estimate_cov, the corresponding covariance.
     """
-    P_inv = np.linalg.inv(y_pred_cov)
-    J = P_est_prev @ A.T @ P_inv
+
+    J = P_est_prev @ matmul_inv(A.T, y_pred_cov)
+
     y_t_tau = (y_est_prev + J @ (y_t_tau_prev - y_pred))
     if estimate_covs:
         y_t_tau_cov = (
             P_est_prev +
             J @ (P_t_tau_prev - y_pred_cov) @ J.T)
-
+        
+        # Sometimes y_t_tau_cov is asymmetric for numerical reasons
+        y_t_tau_cov = (y_t_tau_cov + y_t_tau_cov.T) / 2.
         return y_t_tau, y_t_tau_cov, J
 
     return y_t_tau, J

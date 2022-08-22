@@ -1,3 +1,4 @@
+from tabnanny import verbose
 import numpy as np
 import kalman
 from pytest import approx, raises
@@ -41,8 +42,8 @@ def test_filter_step__dynamic_steps():
     y_est_hat = np.array(y_est_hat)
     P_est_hat = np.array(P_est_hat)
 
-    assert np.array([298.44, -0.51, -2.11, 3.89, -26.2,
-                     -1.29]) == approx(y_est_hat[-1], rel=0.1)
+    assert np.array([298.44, 0.25, -1.9, 3.31, -26.2,
+                     -0.65]) == approx(y_est_hat[-1], rel=0.1)
 
 
 def test_filter_dynamic():
@@ -52,8 +53,8 @@ def test_filter_dynamic():
     kalmod.set_params(X, params)
     y_est_hat, P_est_hat = kalmod.fit(mode='filter')
 
-    assert np.array([298.44, -0.51, -2.11, 3.89, -26.2,
-                     -1.29]) == approx(y_est_hat[-1], rel=0.1)
+    assert np.array([298.44, 0.25, -1.9, 3.31, -26.2,
+                     -0.65]) == approx(y_est_hat[-1], rel=0.1)
 
     # re-run to check that estimated covariances are note recalculated
     _, _ = kalmod.fit(mode='filter')
@@ -91,8 +92,7 @@ def test_parameter_estimation_static():
 
     kalmod.fit(n_it=5)
 
-    kalmod2 = kalman.KalmanModel().set_params(
-        X, noisy_params)
+    kalmod2 = kalman.KalmanModel().set_params(X, noisy_params)
     kalmod2.fit(mode='filter')
 
     assert kalmod.loglikelihood() > kalmod2.loglikelihood()
@@ -139,9 +139,9 @@ def test_parameter_estimation_static_loglikelihood():
     kalmod2 = kalman.KalmanModel()
     kalmod2.set_params(X, noisy_params)
 
-    kalmod2.fit(n_it=10)
+    kalmod2.fit(n_it=100)
 
-    assert kalmod1.loglikelihood() < kalmod2.loglikelihood()
+    assert kalmod1.loglikelihood() <= kalmod2.loglikelihood()
 
 
 def test_parameter_estimation_dynamic_loglikelihood():
@@ -149,14 +149,14 @@ def test_parameter_estimation_dynamic_loglikelihood():
 
     noisy_params = add_noise(params, random_state=RANDOM_STATE)
 
-    kalmod1 = kalman.KalmanModel()
+    kalmod1 = kalman.KalmanModel(verbose=True)
     kalmod1.set_params(X, noisy_params)
 
     kalmod1.fit(n_it=3)
 
-    kalmod2 = kalman.KalmanModel()
+    kalmod2 = kalman.KalmanModel(verbose=True)
     kalmod2.set_params(X, noisy_params)
 
-    kalmod2.fit(n_it=10)
+    kalmod2.fit(n_it=100)
 
-    assert kalmod1.loglikelihood() < kalmod2.loglikelihood()
+    assert kalmod1.loglikelihood() <= kalmod2.loglikelihood()

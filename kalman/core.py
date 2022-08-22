@@ -1,6 +1,10 @@
 import numpy as np
 import copy
-from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step
+from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step, matmul_inv
+from icecream import ic
+
+
+is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
 class KalmanModel():
     # Using Max Welling's notation
@@ -28,7 +32,6 @@ class KalmanModel():
         mode='estimate',
         n_it=10,
     ):
-        self.P_t_tau_estimated = False
 
         if mode == 'filter':
             self.filter()
@@ -39,6 +42,7 @@ class KalmanModel():
             return self.y_t_tau, self.P_t_tau
         elif mode == 'estimate':
             for _ in range(n_it):
+                print(f"\n\n++++++++++++++  {_}  ++++++++++++++")
                 # E step
                 self.filter()
                 self.smooth()
@@ -78,8 +82,7 @@ class KalmanModel():
 
         y_t_t1[0] = self.params.mu
 
-        K[0] = P_t_t1[0] @ self.params.B.T @ np.linalg.inv(
-            self.params.R + self.params.B @ P_t_t1[0] @ self.params.B.T)
+        K[0] = P_t_t1[0] @ matmul_inv(self.params.B.T, (self.params.R + self.params.B @ P_t_t1[0] @ self.params.B.T))
 
         # P_t^t (numerically stable version)
         T = (np.eye(K[0].shape[0]) - K[0] @ self.params.B)
@@ -158,6 +161,7 @@ class KalmanModel():
                     self.P_t_t[-t - 1],
                     self.params.A
                 )
+                assert is_sym(P_t_tau[-t - 1])
             else:
                 y_t_tau[-t - 1], J[-t] = smooth_step(
                     y_t_tau[-t],
@@ -226,19 +230,24 @@ class KalmanModel():
         mu_new = self.y_t_tau[0]
 
         Sigma_new = self.P_t_tau[0]  # + cov y_1 if considering multiple runs
-        A_new = np.sum(M_1, axis=0) @ np.linalg.inv(np.sum(M_0[:-1], axis=0))
+        A_new = matmul_inv(np.mean(M_1, axis=0), np.mean(M_0[:-1], axis=0))
 
-        Q_new = np.mean(M_0[1:] - np.einsum('ij, ...kj->...ik', A_new, M_1),
-                        axis=0)
+        # NB: Tranpose is handled during einsum
+        Q_new = np.mean(M_0[1:], axis=0) - np.einsum('ij, kj->ik', A_new, np.mean(M_1, axis=0))
 
-        B_new = (np.sum(np.einsum('...i,...j->...ij', self.X, self.y_t_tau),
-                        axis=0) @ np.linalg.inv(np.sum(M_0, axis=0)))
-
+        B_new = matmul_inv(np.sum(np.einsum('...i,...j->...ij', self.X, self.y_t_tau),
+                        axis=0), np.sum(M_0, axis=0))
+        
         R_new = (
             np.einsum('...i,...j->...ij', self.X, self.X) -
             np.einsum('ij,...jk->...ik', B_new,
                       np.einsum('...i,...j->...ij', self.y_t_tau, self.X)))
         R_new = np.mean(R_new, axis=0)
+
+        # try sth else
+        #R_new = (np.swapaxes(self.X, -1, -2) @ self.X) - B_new @ np.mean(
+        #              np.einsum('...i,...j->...ij', self.y_t_tau, self.X), axis=0)
+        #R_new = (R_new + R_new.T) / 2
 
         self.params.mu = mu_new
         self.params.Sigma = Sigma_new
@@ -247,8 +256,8 @@ class KalmanModel():
         self.params.B = B_new
         self.params.R = R_new
 
-        self.calculate_filter_cov = False
-        self.P_t_tau_estimated = False
+        self.calculate_filter_cov = True
+        self.calculate_smooth_cov = True
 
         return mu_new, Sigma_new, A_new, Q_new, B_new, R_new
 
@@ -261,7 +270,10 @@ class KalmanModel():
         if calculate_cov:
             H_1 = self.params.R + self.params.B @ np.einsum('...ij,jk->...ik', self.P_t_t1[1:], self.params.B.T)
             H_01 = self.params.R + self.params.B @ self.params.Sigma @ self.params.B.T
-
+            #ic(is_sym(self.params.R))
+            #ic(is_sym(self.params.B @ self.params.Sigma @ self.params.B.T))
+            #ic(is_sym(H_01))
+            
             return (np.vstack((np.array([x_hat_01]), x_hat_1)),
                     np.vstack((np.array([H_01]), H_1)))
             
