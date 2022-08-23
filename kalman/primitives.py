@@ -49,33 +49,33 @@ class KalmanParams():
     def check_params(self, **kwargs):
         if len(kwargs['mu'].shape) != 1:
             raise ValueError(f"Expected mu to be of dimension 1, not {len(kwargs['mu'].shape)}")
-        latent_dim = kwargs['mu'].size
+        self._latent_dim = kwargs['mu'].size
 
-        if kwargs['Sigma'].shape != (latent_dim, latent_dim):
+        if kwargs['Sigma'].shape != (self._latent_dim, self._latent_dim):
             raise ValueError(f"Dimension mismatch between mu and Sigma." +
-                f"Expected Sigma to be of shape {(latent_dim, latent_dim)}, " +
+                f"Expected Sigma to be of shape {(self._latent_dim, self._latent_dim)}, " +
                 f"not {kwargs['Sigma'].shape}")
 
-        if kwargs['A'].shape != (latent_dim, latent_dim):
+        if kwargs['A'].shape != (self._latent_dim, self._latent_dim):
             raise ValueError(f"Dimension mismatch between mu and A." +
-                f"Expected A to be of shape {(latent_dim, latent_dim)}, " +
+                f"Expected A to be of shape {(self._latent_dim, self._latent_dim)}, " +
                 f"not {kwargs['A'].shape}")
 
-        if kwargs['Q'].shape != (latent_dim, latent_dim):
+        if kwargs['Q'].shape != (self._latent_dim, self._latent_dim):
             raise ValueError(f"Dimension mismatch between mu and Q." +
-                f"Expected Q to be of shape {(latent_dim, latent_dim)}, " +
+                f"Expected Q to be of shape {(self._latent_dim, self._latent_dim)}, " +
                 f"not {kwargs['Q'].shape}")
 
-        if kwargs['B'].shape[1] != latent_dim :
+        if kwargs['B'].shape[1] != self._latent_dim :
             raise ValueError(f"Dimension mismatch between mu and B." +
-                f"Expected B to have length of shape {latent_dim}, " +
+                f"Expected B to have length of shape {self._latent_dim}, " +
                 f"along axis 1, not {kwargs['B'].shape[1]}")
 
-        out_dim = kwargs['B'].shape[1]
+        self._out_dim = kwargs['B'].shape[1]
 
-        if kwargs['Q'].shape != (out_dim, out_dim):
+        if kwargs['Q'].shape != (self._out_dim, self._out_dim):
             raise ValueError(f"Dimension mismatch between mu and Q." +
-                f"Expected Q to be of shape {(out_dim, out_dim)}, " +
+                f"Expected Q to be of shape {(self._out_dim, self._out_dim)}, " +
                 f"not {kwargs['Q'].shape}")
 
     def to_dict(self):
@@ -96,6 +96,14 @@ class KalmanParams():
             return self.to_dict() == other
         else:
             raise TypeError
+
+    @property
+    def latent_dim(self):
+        return self._latent_dim
+
+    @property
+    def out_dim(self):
+        return self._out_dim
 
     @property
     def n_params(self):
