@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: pytest - OS ${{ matrix.os }} - Python ${{ matrix.python-version }} - pandas ${{ matrix.pandas-version }} 
+    name: pytest - OS ${{ matrix.os }} - Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -26,8 +26,6 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest
-        pip install pytest-cov
         pip install -e .[dev]
     - name: Test with pytest
       run: |
