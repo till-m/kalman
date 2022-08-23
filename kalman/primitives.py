@@ -38,12 +38,45 @@ class KalmanParams():
         self.init_from_kwargs(**init_dict)
 
     def init_from_kwargs(self, **kwargs):
+        self.check_params(**    kwargs)
         self.mu = kwargs['mu']
         self.Sigma = kwargs['Sigma']
         self.B = kwargs['B']
         self.R = kwargs['R']
         self.A = kwargs['A']
         self.Q = kwargs['Q']
+
+    def check_params(self, **kwargs):
+        if len(kwargs['mu'].shape) != 1:
+            raise ValueError(f"Expected mu to be of dimension 1, not {len(kwargs['mu'].shape)}")
+        self._latent_dim = kwargs['mu'].size
+
+        if kwargs['Sigma'].shape != (self._latent_dim, self._latent_dim):
+            raise ValueError(f"Dimension mismatch between mu and Sigma." +
+                f"Expected Sigma to be of shape {(self._latent_dim, self._latent_dim)}, " +
+                f"not {kwargs['Sigma'].shape}")
+
+        if kwargs['A'].shape != (self._latent_dim, self._latent_dim):
+            raise ValueError(f"Dimension mismatch between mu and A." +
+                f"Expected A to be of shape {(self._latent_dim, self._latent_dim)}, " +
+                f"not {kwargs['A'].shape}")
+
+        if kwargs['Q'].shape != (self._latent_dim, self._latent_dim):
+            raise ValueError(f"Dimension mismatch between mu and Q." +
+                f"Expected Q to be of shape {(self._latent_dim, self._latent_dim)}, " +
+                f"not {kwargs['Q'].shape}")
+
+        if kwargs['B'].shape[1] != self._latent_dim :
+            raise ValueError(f"Dimension mismatch between mu and B." +
+                f"Expected B to have length {self._latent_dim} " +
+                f"along axis 1, not {kwargs['B'].shape[1]}")
+
+        self._out_dim = kwargs['B'].shape[0]
+
+        if kwargs['R'].shape != (self._out_dim, self._out_dim):
+            raise ValueError(f"Dimension mismatch between mu and R." +
+                f"Expected R to be of shape {(self._out_dim, self._out_dim)}, " +
+                f"not {kwargs['R'].shape}")
 
     def to_dict(self):
         _dict = {
@@ -63,6 +96,14 @@ class KalmanParams():
             return self.to_dict() == other
         else:
             raise TypeError
+
+    @property
+    def latent_dim(self):
+        return self._latent_dim
+
+    @property
+    def out_dim(self):
+        return self._out_dim
 
     @property
     def n_params(self):

@@ -1,3 +1,4 @@
+from multiprocessing.sharedctypes import Value
 import numpy as np
 import copy
 from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step, matmul_inv
@@ -15,6 +16,13 @@ class KalmanModel():
 
         if len(X.shape) != 2:
             raise RuntimeError
+
+        if X.shape[1] != self.params.out_dim:
+            print(X.shape)
+            print(self.params.out_dim)
+            raise ValueError(f"Dimension mismatch between X and params." +
+                f"Expected X to have length {self.params.out_dim} " +
+                f"along axis 1, not {X.shape[1]}")
 
         self.X = X
         self.tau = X.shape[-2]
