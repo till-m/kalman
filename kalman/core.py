@@ -50,21 +50,29 @@ class KalmanModel():
         elif mode == 'estimate':
             for i in range(n_it):
                 if self.verbose:
-                    print(f"\n\n++++++++++++++  {i}  ++++++++++++++")
+                    print(f"\n++++++++++++++  {i}  ++++++++++++++")
                 # E step
                 self.filter()
                 self.smooth()
                 self.lag_one_covar_smoother()
                 if self.verbose:
-                    print(self.loglikelihood())
+                    try:
+                        print(self.loglikelihood())
+                    except ValueError:
+                        print("Calculation of loglikelihood failed.")
+                        print("This is likely due to numerical inaccuracies.")
 
                 # M step
                 self.m_step()
             self.filter()
             self.smooth()
             if self.verbose:
-                print(f"\n\n++++++++  Final estimate  +++++++++")
-                print(self.loglikelihood())
+                print(f"\n++++++++  Final estimate  +++++++++")
+                try:
+                    print(self.loglikelihood())
+                except ValueError:
+                    print("Calculation of loglikelihood failed.")
+                    print("This is likely due to numerical inaccuracies.")
             return self.y_t_tau, self.P_t_tau
 
     def filter(self):

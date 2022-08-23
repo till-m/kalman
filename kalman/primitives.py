@@ -6,18 +6,28 @@ is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
 def multivar_normal_loglikelihood(X, X_est, X_est_cov):
     res = 0
+    inf_counter = 0
     for t in range(0, X.shape[0]):
         # Sometimes the covariance matrix is not symmetric due to numerical
         # instabilities
         X_est_cov_ = (X_est_cov[t] + X_est_cov[t].T) / 2
+        p_i = np.log(multivariate_normal(mean=X_est[t], cov=X_est_cov_).pdf(X[t]))
+        if np.isinf(p_i):
+            inf_counter += 1
+            continue
         res += np.log(multivariate_normal(mean=X_est[t], cov=X_est_cov_).pdf(X[t]))
+    if inf_counter:
+        print(f"Encountered {inf_counter} inf values " +
+            f"(that is {(inf_counter/X.shape[0]*100):.2f}%). " +
+            "Loglikelihood will be overestimated.")
     return res
 
-def matmul_inv(A, B):
-    """ Calculates A @ B^(-1) in a numerically stable manner.
+def matmul_inv(P, Q):
+    """ Calculates P @ Q^(-1) in a numerically stable manner.
     """
-    r = np.linalg.solve(B.T, A.T)
+    r = np.linalg.solve(Q.T, P.T)
     return r.T
+
 
 class KalmanParams():
     """
@@ -172,13 +182,17 @@ def filter_step(x, y_est_prev, P_est_prev, A, Q, B, R, estimate_covs=True, y_pre
     return y_pred, kalman_gain, y_est
 
 
-def predict_step(y_est_prev, A, B):
+def predict_step(y_est_prev, A, B, estimate_covs=True, P_est_prev=None, Q=None, R=None):
     """
     Predicts the next state and observation based on the last filtered estimate.
     """
     y_pred = A @ y_est_prev
     x_pred = B @ y_pred
 
+    if estimate_covs:
+        y_pred_cov = A @ P_est_prev @ A.T + Q
+        x_pred_cov = B @ y_pred_cov @ B.T + R
+        return y_pred, y_pred_cov, x_pred, x_pred_cov
     return y_pred, x_pred
 
 
