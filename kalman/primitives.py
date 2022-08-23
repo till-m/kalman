@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.stats import multivariate_normal
-from icecream import ic
 
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
@@ -8,7 +7,10 @@ is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 def multivar_normal_loglikelihood(X, X_est, X_est_cov):
     res = 0
     for t in range(0, X.shape[0]):
-        res += np.log(multivariate_normal(mean=X_est[t], cov=X_est_cov[t]).pdf(X[t]))
+        # Sometimes the covariance matrix is not symmetric due to numerical
+        # instabilities
+        X_est_cov_ = (X_est_cov[t] + X_est_cov[t].T) / 2
+        res += np.log(multivariate_normal(mean=X_est[t], cov=X_est_cov_).pdf(X[t]))
     return res
 
 def matmul_inv(A, B):

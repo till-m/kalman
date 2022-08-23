@@ -1,7 +1,6 @@
 import numpy as np
 import copy
 from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step, matmul_inv
-from icecream import ic
 
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
@@ -41,19 +40,23 @@ class KalmanModel():
             self.smooth()
             return self.y_t_tau, self.P_t_tau
         elif mode == 'estimate':
-            for _ in range(n_it):
-                print(f"\n\n++++++++++++++  {_}  ++++++++++++++")
+            for i in range(n_it):
+                if self.verbose:
+                    print(f"\n\n++++++++++++++  {i}  ++++++++++++++")
                 # E step
                 self.filter()
                 self.smooth()
                 self.lag_one_covar_smoother()
+                if self.verbose:
+                    print(self.loglikelihood())
 
                 # M step
                 self.m_step()
-                if self.verbose:
-                    print(self.loglikelihood())
             self.filter()
             self.smooth()
+            if self.verbose:
+                print(f"\n\n++++++++  Final estimate  +++++++++")
+                print(self.loglikelihood())
             return self.y_t_tau, self.P_t_tau
 
     def filter(self):
@@ -244,11 +247,6 @@ class KalmanModel():
                       np.einsum('...i,...j->...ij', self.y_t_tau, self.X)))
         R_new = np.mean(R_new, axis=0)
 
-        # try sth else
-        #R_new = (np.swapaxes(self.X, -1, -2) @ self.X) - B_new @ np.mean(
-        #              np.einsum('...i,...j->...ij', self.y_t_tau, self.X), axis=0)
-        #R_new = (R_new + R_new.T) / 2
-
         self.params.mu = mu_new
         self.params.Sigma = Sigma_new
         self.params.A = A_new
@@ -266,13 +264,10 @@ class KalmanModel():
 
     def measurements(self, calculate_cov=False):
         x_hat_01 = self.params.B @ self.params.mu
-        x_hat_1 = np.einsum('ij,...j->...i', self.params.B, self.y_t_t1)
+        x_hat_1 = np.einsum('ij,...j->...i', self.params.B, self.y_t_t1[1:])
         if calculate_cov:
             H_1 = self.params.R + self.params.B @ np.einsum('...ij,jk->...ik', self.P_t_t1[1:], self.params.B.T)
             H_01 = self.params.R + self.params.B @ self.params.Sigma @ self.params.B.T
-            #ic(is_sym(self.params.R))
-            #ic(is_sym(self.params.B @ self.params.Sigma @ self.params.B.T))
-            #ic(is_sym(H_01))
             
             return (np.vstack((np.array([x_hat_01]), x_hat_1)),
                     np.vstack((np.array([H_01]), H_1)))
