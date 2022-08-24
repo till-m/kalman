@@ -84,7 +84,7 @@ class KalmanParams():
         self._out_dim = kwargs['B'].shape[0]
 
         if kwargs['R'].shape != (self._out_dim, self._out_dim):
-            raise ValueError(f"Dimension mismatch between mu and R." +
+            raise ValueError(f"Dimension mismatch between B and R." +
                 f"Expected R to be of shape {(self._out_dim, self._out_dim)}, " +
                 f"not {kwargs['R'].shape}")
 
@@ -182,7 +182,7 @@ def filter_step(x, y_est_prev, P_est_prev, A, Q, B, R, estimate_covs=True, y_pre
     return y_pred, kalman_gain, y_est
 
 
-def predict_step(y_est_prev, A, B, estimate_covs=True, P_est_prev=None, Q=None, R=None):
+def predict_step(y_est_prev, A, B, estimate_covs=False, P_est_prev=None, Q=None, R=None):
     """
     Predicts the next state and observation based on the last filtered estimate.
     """

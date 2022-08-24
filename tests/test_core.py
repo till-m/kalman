@@ -25,25 +25,13 @@ def test_filter_static_no_noise():
     assert np.squeeze(y_est_hat) == approx(y_est, rel=0.01)
     assert np.squeeze(P_est_hat) == approx(np.squeeze(P_est), rel=0.01)
 
-
-def test_filter_step__dynamic_steps():
+def test_malformed_X():
     X, params = example9_params()
 
-    y = params.mu  # initial estimate
-    P = params.Sigma  # initial variance estimate
+    kalmod = kalman.KalmanModel()
+    with raises(ValueError):
+        kalmod.set_params(X[:,:1], params)
 
-    y_est_hat = []
-    P_est_hat = []
-    for i in range(len(X)):
-        _, _, _, y, P = kalman.filter_step(X[i], y, P, params.A, params.Q,
-                                           params.B, params.R)
-        y_est_hat.append(y)
-        P_est_hat.append(P)
-    y_est_hat = np.array(y_est_hat)
-    P_est_hat = np.array(P_est_hat)
-
-    assert np.array([298.44, 0.25, -1.9, 3.31, -26.2,
-                     -0.65]) == approx(y_est_hat[-1], rel=0.1)
 
 
 def test_filter_dynamic():
