@@ -1,4 +1,5 @@
-from multiprocessing.sharedctypes import Value
+from re import U
+from warnings import warn
 import numpy as np
 import copy
 from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step, matmul_inv
@@ -11,7 +12,7 @@ class KalmanModel():
     def __init__(self, verbose=False) -> None:
         self.verbose = verbose
 
-    def set_params(self, X: np.ndarray, params: KalmanParams):
+    def set_params(self, X: np.ndarray, params: KalmanParams, U=None):
         self.params = copy.deepcopy(params)
 
         if len(X.shape) != 2:
@@ -24,15 +25,34 @@ class KalmanModel():
                 f"Expected X to have length {self.params.out_dim} " +
                 f"along axis 1, not {X.shape[1]}")
 
+        if U is not None:
+            try:
+                params.C
+            except AttributeError:
+                raise RuntimeError("Control U provided, but no C in params.")
+        else:
+            try:
+                params.C
+                msg = "C in params but no U provided, control will be ignored."
+                warn(msg, RuntimeWarning)
+            except AttributeError:
+                pass
+
         self.X = X
         self.tau = X.shape[-2]
         self.d = self.params.mu.size
         self.k = X.shape[-1]
 
+        self._has_control = params.C is not None
+
         self.calculate_filter_cov = True
         self.calculate_smooth_cov = True
 
         return self
+
+    @property
+    def has_control(self):
+        return self._has_control
 
     def fit(
         self,
@@ -122,7 +142,9 @@ class KalmanModel():
                     self.params.A,
                     self.params.Q,
                     self.params.B,
-                    self.params.R)
+                    self.params.R,
+                    u=self.U[t] if self._has_control else None,
+                    C=self.params.C)
             else:
                 y_t_t1[t], K[t], y_t_t[t] = filter_step(
                     self.X[t], 
@@ -134,7 +156,9 @@ class KalmanModel():
                     self.params.R,
                     estimate_covs=False,
                     y_pred_cov=P_t_t1[t],
-                    y_est_cov=P_t_t[t],)
+                    y_est_cov=P_t_t[t],
+                    u=self.U[t] if self._has_control else None,
+                    C=self.params.C)
 
         # store results
         if self.calculate_filter_cov:
@@ -178,7 +202,9 @@ class KalmanModel():
                     self.P_t_t1[-t],
                     self.y_t_t[-t - 1],
                     self.P_t_t[-t - 1],
-                    self.params.A
+                    self.params.A,
+                    u=self.U[t] if self._has_control else None,
+                    C=self.params.C
                 )
                 assert is_sym(P_t_tau[-t - 1])
             else:
@@ -190,7 +216,9 @@ class KalmanModel():
                     self.y_t_t[-t - 1],
                     self.P_t_t[-t - 1],
                     self.params.A,
-                    False
+                    estimate_covs=False,
+                    u=self.U[t] if self._has_control else None,
+                    C=self.params.C
                 )
 
         self.y_t_tau = y_t_tau
@@ -237,6 +265,9 @@ class KalmanModel():
         M_0 = np.zeros(self.P_t_tau.shape)
         M_1 = np.zeros(self.P_tt1_tau.shape)
 
+        if self.has_control:
+            N_0 = np.zeros((self.tau-1, *self.C.T.shape))
+            N_1 = np.zeros((self.tau-1, *self.C.T.shape))
         if self.y_t_tau.shape[0] != self.tau:
             raise RuntimeError
 
@@ -246,13 +277,34 @@ class KalmanModel():
             if i >= 1:
                 M_1[i - 1] = self.P_tt1_tau[i - 1] + np.outer(self.y_t_tau[i], self.y_t_tau[i - 1])
 
+                if self.has_control:
+                    N_0[i - 1] = np.outer(self.u[i], self.y_t_tau[i])
+                    N_1[i - 1] = np.outer(self.u[i], self.y_t_tau[i - 1])
+
         mu_new = self.y_t_tau[0]
 
         Sigma_new = self.P_t_tau[0]  # + cov y_1 if considering multiple runs
-        A_new = matmul_inv(np.mean(M_1, axis=0), np.mean(M_0[:-1], axis=0))
+        if self.has_control:
+            # Construct C_new
+            G = np.linalg.solve(np.mean(M_0[:-1], axis=0), np.mean(N_1, axis=0).T)
 
-        # NB: Tranpose is handled during einsum
-        Q_new = np.mean(M_0[1:], axis=0) - np.einsum('ij, kj->ik', A_new, np.mean(M_1, axis=0))
+            C_new = matmul_inv(
+                np.sum(N_0, axis=0) - np.sum(M_1, axis=0) @ G,
+                np.sum(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) + 
+                    np.sum(N_1, axis=0) @ G
+            )
+            
+            A_new = matmul_inv(
+                np.mean(M_1, axis=0) - C_new @ np.mean(N_1, axis=0),
+                np.mean(M_0[:-1], axis=0))
+            
+            Q_new = np.mean(M_0[1:], axis=0) - np.einsum('ij, kj->ik', A_new, np.mean(M_1, axis=0))
+        else:
+            A_new = matmul_inv(np.mean(M_1, axis=0), np.mean(M_0[:-1], axis=0))
+
+            # NB: Tranpose is handled during einsum
+            # Using mean instead of 1/xyz * sum
+            Q_new = np.mean(M_0[1:], axis=0) - np.einsum('ij, kj->ik', A_new, np.mean(M_1, axis=0))
 
         B_new = matmul_inv(np.sum(np.einsum('...i,...j->...ij', self.X, self.y_t_tau),
                         axis=0), np.sum(M_0, axis=0))
