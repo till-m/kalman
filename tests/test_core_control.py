@@ -1,7 +1,6 @@
 import numpy as np
 import kalman
 from pytest import approx, raises, warns
-from icecream import ic
 from kalman.primitives import verify_control
 
 from .utils import add_noise, example5_params, example9_params, example10_params
@@ -249,7 +248,6 @@ def test_parameter_estimation_dynamic_loglikelihood():
 
     kalmod1.fit(n_it=3)
 
-    ic(np.linalg.det(params.Q))
     kalmod2 = kalman.KalmanModel(verbose=True)
     kalmod2.set_params(X, noisy_params, U=U)
 
