@@ -87,7 +87,7 @@ def test_filter_step_static_no_noise():
     assert P_est_hat == approx(P_est, rel=0.01)
 
 
-def test_filter_step__dynamic_steps():
+def test_filter_step_dynamic_steps():
     X, params = example9_params()
 
     y = params.mu  # initial estimate

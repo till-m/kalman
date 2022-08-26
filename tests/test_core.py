@@ -1,4 +1,3 @@
-from tabnanny import verbose
 import numpy as np
 import kalman
 from pytest import approx, raises
@@ -25,13 +24,13 @@ def test_filter_static_no_noise():
     assert np.squeeze(y_est_hat) == approx(y_est, rel=0.01)
     assert np.squeeze(P_est_hat) == approx(np.squeeze(P_est), rel=0.01)
 
+
 def test_malformed_X():
     X, params = example9_params()
 
     kalmod = kalman.KalmanModel()
     with raises(ValueError):
         kalmod.set_params(X[:,:1], params)
-
 
 
 def test_filter_dynamic():
@@ -44,7 +43,7 @@ def test_filter_dynamic():
     assert np.array([298.44, 0.25, -1.9, 3.31, -26.2,
                      -0.65]) == approx(y_est_hat[-1], rel=0.1)
 
-    # re-run to check that estimated covariances are note recalculated
+    # re-run to check that estimated covariances are not recalculated
     _, _ = kalmod.fit(mode='filter')
 
     _, P_smoothed = kalmod.fit(mode='smooth')
@@ -67,11 +66,6 @@ def test_check_X_dims():
 
 def test_parameter_estimation_static():
     X, params = example5_params()
-    R = params.R
-
-    A = params.A  # Problem is static -- building doesn't change height
-    B = params.B  # We're measuring the hidden state
-    Q = params.Q  # True building height is noiseless
 
     noisy_params = add_noise(params, random_state=RANDOM_STATE)
 
@@ -145,6 +139,6 @@ def test_parameter_estimation_dynamic_loglikelihood():
     kalmod2 = kalman.KalmanModel(verbose=True)
     kalmod2.set_params(X, noisy_params)
 
-    kalmod2.fit(n_it=100)
+    kalmod2.fit(n_it=10)
 
     assert kalmod1.loglikelihood() <= kalmod2.loglikelihood()

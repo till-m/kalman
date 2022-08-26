@@ -1,8 +1,10 @@
 import numpy as np
 from scipy.stats import multivariate_normal
+from warnings import warn
 
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
+
 
 def multivar_normal_loglikelihood(X, X_est, X_est_cov):
     res = 0
@@ -18,9 +20,10 @@ def multivar_normal_loglikelihood(X, X_est, X_est_cov):
         res += np.log(multivariate_normal(mean=X_est[t], cov=X_est_cov_).pdf(X[t]))
     if inf_counter:
         print(f"Encountered {inf_counter} inf values " +
-            f"(that is {(inf_counter/X.shape[0]*100):.2f}%). " +
-            "Loglikelihood will be overestimated.")
+              f"(that is {(inf_counter/X.shape[0]*100):.2f}%). " +
+              "Loglikelihood will be overestimated.")
     return res
+
 
 def matmul_inv(P, Q):
     """ Calculates P @ Q^(-1) in a numerically stable manner.
@@ -29,12 +32,27 @@ def matmul_inv(P, Q):
     return r.T
 
 
+def verify_control(u, C):
+    if u is not None:
+        if C is None:
+            raise RuntimeError("Control U provided, but no C in params.")
+        if len(u.shape) != 1:
+            msg = f"Excpted u of dimension 1, not {len(u.shape)}."
+            raise ValueError()
+    elif u is None and C is not None:
+        msg = "C provided but no u, control will be ignored."
+        warn(msg, RuntimeWarning)
+
+    return u is not None and C is not None
+
+
 class KalmanParams():
     """
     
     This just allows a more convenient syntax of params.A instead of
         params['A'].
     """
+
     def __init__(self, *args, **kwargs):
         if len(args) == 1 and isinstance(args[0], dict):
             self.init_from_dict(args[0])
@@ -48,7 +66,7 @@ class KalmanParams():
         self.init_from_kwargs(**init_dict)
 
     def init_from_kwargs(self, **kwargs):
-        self.check_params(**    kwargs)
+        self.check_params(**kwargs)
         self.mu = kwargs['mu']
         self.Sigma = kwargs['Sigma']
         self.B = kwargs['B']
@@ -56,27 +74,43 @@ class KalmanParams():
         self.A = kwargs['A']
         self.Q = kwargs['Q']
 
+        try:
+            self.C = kwargs['C']
+        except KeyError:
+            self.C = None
+
+        self._has_control = self.C is not None
+
+    @property
+    def has_control(self):
+        return self._has_control
+
     def check_params(self, **kwargs):
         if len(kwargs['mu'].shape) != 1:
-            raise ValueError(f"Expected mu to be of dimension 1, not {len(kwargs['mu'].shape)}")
+            raise ValueError(
+                f"Expected mu to be of dimension 1, not {len(kwargs['mu'].shape)}"
+            )
         self._latent_dim = kwargs['mu'].size
 
         if kwargs['Sigma'].shape != (self._latent_dim, self._latent_dim):
-            raise ValueError(f"Dimension mismatch between mu and Sigma." +
-                f"Expected Sigma to be of shape {(self._latent_dim, self._latent_dim)}, " +
-                f"not {kwargs['Sigma'].shape}")
+            raise ValueError(
+                f"Dimension mismatch between mu and Sigma." +
+                f"Expected Sigma to be of shape {(self._latent_dim, self._latent_dim)}, "
+                + f"not {kwargs['Sigma'].shape}")
 
         if kwargs['A'].shape != (self._latent_dim, self._latent_dim):
-            raise ValueError(f"Dimension mismatch between mu and A." +
-                f"Expected A to be of shape {(self._latent_dim, self._latent_dim)}, " +
-                f"not {kwargs['A'].shape}")
+            raise ValueError(
+                f"Dimension mismatch between mu and A." +
+                f"Expected A to be of shape {(self._latent_dim, self._latent_dim)}, "
+                + f"not {kwargs['A'].shape}")
 
         if kwargs['Q'].shape != (self._latent_dim, self._latent_dim):
-            raise ValueError(f"Dimension mismatch between mu and Q." +
-                f"Expected Q to be of shape {(self._latent_dim, self._latent_dim)}, " +
-                f"not {kwargs['Q'].shape}")
+            raise ValueError(
+                f"Dimension mismatch between mu and Q." +
+                f"Expected Q to be of shape {(self._latent_dim, self._latent_dim)}, "
+                + f"not {kwargs['Q'].shape}")
 
-        if kwargs['B'].shape[1] != self._latent_dim :
+        if kwargs['B'].shape[1] != self._latent_dim:
             raise ValueError(f"Dimension mismatch between mu and B." +
                 f"Expected B to have length {self._latent_dim} " +
                 f"along axis 1, not {kwargs['B'].shape[1]}")
@@ -84,9 +118,19 @@ class KalmanParams():
         self._out_dim = kwargs['B'].shape[0]
 
         if kwargs['R'].shape != (self._out_dim, self._out_dim):
-            raise ValueError(f"Dimension mismatch between B and R." +
-                f"Expected R to be of shape {(self._out_dim, self._out_dim)}, " +
-                f"not {kwargs['R'].shape}")
+            raise ValueError(
+                f"Dimension mismatch between B and R." +
+                f"Expected R to be of shape {(self._out_dim, self._out_dim)}, "
+                + f"not {kwargs['R'].shape}")
+
+        try:
+            if kwargs['C'].shape[0] != self._latent_dim:
+                raise ValueError(
+                    f"Dimension mismatch between mu and C." +
+                    f"Expected C to have length {self._latent_dim} " +
+                    f"along axis 0, not {kwargs['C'].shape[0]}")
+        except KeyError:
+            pass
 
     def to_dict(self):
         _dict = {
@@ -117,10 +161,22 @@ class KalmanParams():
 
     @property
     def n_params(self):
-        return self.mu.size + self.Sigma.size + self.B.size + self.R.size + self.A.size + self.Q.size
+        res = self.C.size if self._has_control else 0
+        return res + self.mu.size + self.Sigma.size + self.B.size + self.R.size + self.A.size + self.Q.size
 
 
-def filter_step(x, y_est_prev, P_est_prev, A, Q, B, R, estimate_covs=True, y_pred_cov=None, y_est_cov=None):
+def filter_step(x,
+                y_est_prev,
+                P_est_prev,
+                A,
+                Q,
+                B,
+                R,
+                estimate_covs=True,
+                y_pred_cov=None,
+                y_est_cov=None,
+                u=None,
+                C=None):
     """
     Performs one full step of Kalman filtering.
 
@@ -151,6 +207,10 @@ def filter_step(x, y_est_prev, P_est_prev, A, Q, B, R, estimate_covs=True, y_pre
 
         y_est_cov: If the covariances are not estimated, they need to be
             provided.
+        
+        u: Control parameters at time t.
+
+        C: Matrix directing the influence of u on the state space evolution.
 
         Returns:
             y_pred: Predicted value of y at time t based on t-1 measurements.
@@ -163,8 +223,11 @@ def filter_step(x, y_est_prev, P_est_prev, A, Q, B, R, estimate_covs=True, y_pre
 
             y_est_cov: If estimate_covs, also returns the associated covariance.
     """
-    y_pred = A @ y_est_prev
+    has_control = verify_control(u, C)
 
+    y_pred = A @ y_est_prev
+    if has_control:
+        y_pred += C @ u
     if estimate_covs:
         y_pred_cov = A @ P_est_prev @ A.T + Q
 
@@ -182,11 +245,24 @@ def filter_step(x, y_est_prev, P_est_prev, A, Q, B, R, estimate_covs=True, y_pre
     return y_pred, kalman_gain, y_est
 
 
-def predict_step(y_est_prev, A, B, estimate_covs=False, P_est_prev=None, Q=None, R=None):
+def predict_step(y_est_prev,
+                 A,
+                 B,
+                 estimate_covs=False,
+                 P_est_prev=None,
+                 Q=None,
+                 R=None,
+                 u=None,
+                 C=None):
     """
     Predicts the next state and observation based on the last filtered estimate.
     """
+    has_control = verify_control(u, C)
+
     y_pred = A @ y_est_prev
+    if has_control:
+        y_pred += C @ u
+
     x_pred = B @ y_pred
 
     if estimate_covs:
@@ -196,7 +272,16 @@ def predict_step(y_est_prev, A, B, estimate_covs=False, P_est_prev=None, Q=None,
     return y_pred, x_pred
 
 
-def smooth_step(y_t_tau_prev, P_t_tau_prev, y_pred, y_pred_cov, y_est_prev, P_est_prev, A, estimate_covs=True):
+def smooth_step(y_t_tau_prev,
+                P_t_tau_prev,
+                y_pred,
+                y_pred_cov,
+                y_est_prev,
+                P_est_prev,
+                A,
+                estimate_covs=True,
+                u=None,
+                C=None):
     """
     Performs one Kalman smoothing step.
 
@@ -231,15 +316,17 @@ def smooth_step(y_t_tau_prev, P_t_tau_prev, y_pred, y_pred_cov, y_est_prev, P_es
 
         P_t_tau_prev: If estimate_cov, the corresponding covariance.
     """
+    has_control = verify_control(u, C)
 
     J = P_est_prev @ matmul_inv(A.T, y_pred_cov)
 
     y_t_tau = (y_est_prev + J @ (y_t_tau_prev - y_pred))
+    if has_control:
+        y_t_tau = y_t_tau - C @ u
+
     if estimate_covs:
-        y_t_tau_cov = (
-            P_est_prev +
-            J @ (P_t_tau_prev - y_pred_cov) @ J.T)
-        
+        y_t_tau_cov = (P_est_prev + J @ (P_t_tau_prev - y_pred_cov) @ J.T)
+
         # Sometimes y_t_tau_cov is asymmetric for numerical reasons
         y_t_tau_cov = (y_t_tau_cov + y_t_tau_cov.T) / 2.
         return y_t_tau, y_t_tau_cov, J
