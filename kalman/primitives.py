@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.stats import multivariate_normal
 from warnings import warn
+from icecream import ic
+
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
@@ -34,12 +36,16 @@ def matmul_inv(P, Q):
 
 
 def verify_control(u, C):
-    if u is not None and C is None:
-        raise RuntimeError("Control U provided, but no C in params.")
+    if u is not None:
+        if C is None:
+            raise RuntimeError("Control U provided, but no C in params.")
+        if len(u.shape) != 1:
+            msg = f"Excpted u of dimension 1, not {len(u.shape)}."
+            raise ValueError()
     elif u is None and C is not None:
         msg = "C provided but no u, control will be ignored."
         warn(msg, RuntimeWarning)
-    
+
     return u is not None and C is not None
 
 
@@ -225,7 +231,6 @@ def filter_step(x,
     y_pred = A @ y_est_prev
     if has_control:
         y_pred += C @ u
-
     if estimate_covs:
         y_pred_cov = A @ P_est_prev @ A.T + Q
 
@@ -255,7 +260,12 @@ def predict_step(y_est_prev,
     """
     Predicts the next state and observation based on the last filtered estimate.
     """
+    has_control = verify_control(u, C)
+
     y_pred = A @ y_est_prev
+    if has_control:
+        y_pred += C @ u
+
     x_pred = B @ y_pred
 
     if estimate_covs:

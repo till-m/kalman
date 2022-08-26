@@ -1,4 +1,3 @@
-from tabnanny import verbose
 import numpy as np
 import kalman
 from pytest import approx, raises

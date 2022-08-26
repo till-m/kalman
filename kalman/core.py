@@ -13,30 +13,8 @@ class KalmanModel():
         self.verbose = verbose
 
     def set_params(self, X: np.ndarray, params: KalmanParams, U=None):
+        self.verify_params(X, U, params)
         self.params = copy.deepcopy(params)
-
-        if len(X.shape) != 2:
-            raise RuntimeError
-
-        if X.shape[1] != self.params.out_dim:
-            print(X.shape)
-            print(self.params.out_dim)
-            raise ValueError(f"Dimension mismatch between X and params." +
-                f"Expected X to have length {self.params.out_dim} " +
-                f"along axis 1, not {X.shape[1]}")
-
-        if U is not None:
-            try:
-                params.C
-            except AttributeError:
-                raise RuntimeError("Control U provided, but no C in params.")
-        else:
-            try:
-                params.C
-                msg = "C in params but no U provided, control will be ignored."
-                warn(msg, RuntimeWarning)
-            except AttributeError:
-                pass
 
         self.X = X
         self.tau = X.shape[-2]
@@ -49,6 +27,29 @@ class KalmanModel():
         self.calculate_smooth_cov = True
 
         return self
+
+    def verify_params(self, X, U, params):
+        
+        #TODO: This needs to go once/if we want to fit multiple runs 
+        if len(X.shape) != 2:
+            raise RuntimeError
+
+        if X.shape[1] != params.out_dim:
+            raise ValueError(f"Dimension mismatch between X and params. " +
+                f"Expected X to have length {params.out_dim} " +
+                f"along axis 1, not {X.shape[1]}")
+
+        if U is not None:
+            if params.C is None:
+                raise RuntimeError("Control U provided, but no C in params. ")
+            if X.shape[-2] - 1 > U.shape[-2]:
+                raise ValueError(f"Dimension mismatch between X and U." +
+                    f"Expected U to have at least length {X.shape[-2] - 1} " +
+                    f"along axis 0, not {U.shape[-2]}")
+        else:
+            if params.C is not None:
+                msg = "C in params but no U provided, control will be ignored."
+                warn(msg, RuntimeWarning)
 
     @property
     def has_control(self):
@@ -297,12 +298,21 @@ class KalmanModel():
             A_new = matmul_inv(
                 np.mean(M_1, axis=0) - C_new @ np.mean(N_1, axis=0),
                 np.mean(M_0[:-1], axis=0))
-            
-            Q_new = np.mean(M_0[1:], axis=0) - np.einsum('ij, kj->ik', A_new, np.mean(M_1, axis=0))
+
+            # Sum of means is more stable than mean of sums
+            Q_new = (
+                np.mean(M_0[1:], axis=0)
+                - (C_new @ np.mean(N_0, axis=0)).T
+                - np.einsum('ij, kj->ik', A_new, np.mean(M_1, axis=0))
+                + A_new @ (C_new @ np.mean(N_1, axis=0)).T
+                - C_new @ np.mean(N_0, axis=0)
+                + C_new @ np.mean(N_1, axis=0) @ A_new
+                + C_new @ np.mean(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) @ C_new.T
+            )
         else:
             A_new = matmul_inv(np.mean(M_1, axis=0), np.mean(M_0[:-1], axis=0))
 
-            # NB: Tranpose is handled during einsum
+            # NB: Transpose is handled during einsum
             # Using mean instead of 1/xyz * sum
             Q_new = np.mean(M_0[1:], axis=0) - np.einsum('ij, kj->ik', A_new, np.mean(M_1, axis=0))
 
