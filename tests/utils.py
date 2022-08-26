@@ -42,6 +42,8 @@ def add_noise(params: kalman.KalmanParams, random_state=None, rel=1e-2):
     noisy_params.B = noisify_array(noisy_params.B, rel=rel,  random_state=random_state)
     noisy_params.mu = noisify_array(noisy_params.mu, rel=rel,  random_state=random_state)
 
+    if params.has_control:
+        noisy_params.C = noisify_array(noisy_params.C, rel=rel, random_state=random_state)
     noisy_params.Sigma = noisify_covariance_matrix(
         noisy_params.Sigma,
         rel=rel,

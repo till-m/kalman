@@ -1,9 +1,8 @@
-from re import U
 from warnings import warn
 import numpy as np
 import copy
 from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step, matmul_inv
-
+from icecream import ic
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
@@ -17,6 +16,7 @@ class KalmanModel():
         self.params = copy.deepcopy(params)
 
         self.X = X
+        self.U = U
         self.tau = X.shape[-2]
         self.d = self.params.mu.size
         self.k = X.shape[-1]
@@ -267,8 +267,8 @@ class KalmanModel():
         M_1 = np.zeros(self.P_tt1_tau.shape)
 
         if self.has_control:
-            N_0 = np.zeros((self.tau-1, *self.C.T.shape))
-            N_1 = np.zeros((self.tau-1, *self.C.T.shape))
+            N_0 = np.zeros((self.tau-1, *self.params.C.T.shape))
+            N_1 = np.zeros((self.tau-1, *self.params.C.T.shape))
         if self.y_t_tau.shape[0] != self.tau:
             raise RuntimeError
 
@@ -279,8 +279,8 @@ class KalmanModel():
                 M_1[i - 1] = self.P_tt1_tau[i - 1] + np.outer(self.y_t_tau[i], self.y_t_tau[i - 1])
 
                 if self.has_control:
-                    N_0[i - 1] = np.outer(self.u[i], self.y_t_tau[i])
-                    N_1[i - 1] = np.outer(self.u[i], self.y_t_tau[i - 1])
+                    N_0[i - 1] = np.outer(self.U[i], self.y_t_tau[i])
+                    N_1[i - 1] = np.outer(self.U[i], self.y_t_tau[i - 1])
 
         mu_new = self.y_t_tau[0]
 
@@ -290,11 +290,10 @@ class KalmanModel():
             G = np.linalg.solve(np.mean(M_0[:-1], axis=0), np.mean(N_1, axis=0).T)
 
             C_new = matmul_inv(
-                np.sum(N_0, axis=0) - np.sum(M_1, axis=0) @ G,
-                np.sum(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) + 
-                    np.sum(N_1, axis=0) @ G
+                np.mean(N_0, axis=0).T - np.mean(M_1, axis=0) @ G,
+                np.mean(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) + 
+                    np.mean(N_1, axis=0) @ G
             )
-            
             A_new = matmul_inv(
                 np.mean(M_1, axis=0) - C_new @ np.mean(N_1, axis=0),
                 np.mean(M_0[:-1], axis=0))
@@ -303,7 +302,7 @@ class KalmanModel():
             Q_new = (
                 np.mean(M_0[1:], axis=0)
                 - (C_new @ np.mean(N_0, axis=0)).T
-                - np.einsum('ij, kj->ik', A_new, np.mean(M_1, axis=0))
+                - A_new @ np.mean(M_1, axis=0).T
                 + A_new @ (C_new @ np.mean(N_1, axis=0)).T
                 - C_new @ np.mean(N_0, axis=0)
                 + C_new @ np.mean(N_1, axis=0) @ A_new
@@ -331,6 +330,8 @@ class KalmanModel():
         self.params.Q = Q_new
         self.params.B = B_new
         self.params.R = R_new
+        if self.has_control:
+            self.params.C = C_new
 
         self.calculate_filter_cov = True
         self.calculate_smooth_cov = True
