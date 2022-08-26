@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.stats import multivariate_normal
 from warnings import warn
-from icecream import ic
 
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
@@ -14,13 +13,11 @@ def multivar_normal_loglikelihood(X, X_est, X_est_cov):
         # Sometimes the covariance matrix is not symmetric due to numerical
         # instabilities
         X_est_cov_ = (X_est_cov[t] + X_est_cov[t].T) / 2
-        p_i = np.log(
-            multivariate_normal(mean=X_est[t], cov=X_est_cov_).pdf(X[t]))
+        p_i = np.log(multivariate_normal(mean=X_est[t], cov=X_est_cov_).pdf(X[t]))
         if np.isinf(p_i):
             inf_counter += 1
             continue
-        res += np.log(
-            multivariate_normal(mean=X_est[t], cov=X_est_cov_).pdf(X[t]))
+        res += np.log(multivariate_normal(mean=X_est[t], cov=X_est_cov_).pdf(X[t]))
     if inf_counter:
         print(f"Encountered {inf_counter} inf values " +
               f"(that is {(inf_counter/X.shape[0]*100):.2f}%). " +
@@ -115,8 +112,8 @@ class KalmanParams():
 
         if kwargs['B'].shape[1] != self._latent_dim:
             raise ValueError(f"Dimension mismatch between mu and B." +
-                             f"Expected B to have length {self._latent_dim} " +
-                             f"along axis 1, not {kwargs['B'].shape[1]}")
+                f"Expected B to have length {self._latent_dim} " +
+                f"along axis 1, not {kwargs['B'].shape[1]}")
 
         self._out_dim = kwargs['B'].shape[0]
 

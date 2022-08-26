@@ -2,7 +2,6 @@ from warnings import warn
 import numpy as np
 import copy
 from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step, matmul_inv
-from icecream import ic
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
@@ -29,7 +28,6 @@ class KalmanModel():
         return self
 
     def verify_params(self, X, U, params):
-        
         #TODO: This needs to go once/if we want to fit multiple runs 
         if len(X.shape) != 2:
             raise RuntimeError
