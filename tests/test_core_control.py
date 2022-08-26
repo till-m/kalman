@@ -251,6 +251,7 @@ def test_parameter_estimation_dynamic_loglikelihood():
     kalmod2 = kalman.KalmanModel(verbose=True)
     kalmod2.set_params(X, noisy_params, U=U)
 
-    kalmod2.fit(n_it=5)
+    kalmod2.fit(n_it=100)
 
     assert kalmod1.loglikelihood() <= kalmod2.loglikelihood()
+    raise RuntimeError

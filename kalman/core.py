@@ -2,6 +2,7 @@ from warnings import warn
 import numpy as np
 import copy
 from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step, matmul_inv
+from icecream import ic
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
@@ -20,7 +21,7 @@ class KalmanModel():
         self.d = self.params.mu.size
         self.k = X.shape[-1]
 
-        self._has_control = params.C is not None
+        self._has_control = params.C is not None and U is not None
 
         self.calculate_filter_cov = True
         self.calculate_smooth_cov = True
@@ -205,7 +206,6 @@ class KalmanModel():
                     u=self.U[t] if self._has_control else None,
                     C=self.params.C
                 )
-                assert is_sym(P_t_tau[-t - 1])
             else:
                 y_t_tau[-t - 1], J[-t] = smooth_step(
                     y_t_tau[-t],
@@ -297,15 +297,26 @@ class KalmanModel():
                 np.mean(M_0[:-1], axis=0))
 
             # Sum of means is more stable than mean of sums
+            #Q_new = (
+            #    np.mean(M_0[1:], axis=0)
+            #    - (C_new @ np.mean(N_0, axis=0)).T
+            #    - A_new @ np.mean(M_1, axis=0).T
+            #    + A_new @ (C_new @ np.mean(N_1, axis=0)).T
+            #    - C_new @ np.mean(N_0, axis=0)
+            #    + C_new @ np.mean(N_1, axis=0) @ A_new.T
+            #    + C_new @ np.mean(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) @ C_new.T
+            #)
             Q_new = (
                 np.mean(M_0[1:], axis=0)
-                - (C_new @ np.mean(N_0, axis=0)).T
+                - 2*(C_new @ np.mean(N_0, axis=0)).T
                 - A_new @ np.mean(M_1, axis=0).T
-                + A_new @ (C_new @ np.mean(N_1, axis=0)).T
-                - C_new @ np.mean(N_0, axis=0)
-                + C_new @ np.mean(N_1, axis=0) @ A_new
+                #+ A_new @ (C_new @ np.mean(N_1, axis=0)).T
+                #- C_new @ np.mean(N_0, axis=0)
+                + 2* C_new @ np.mean(N_1, axis=0) @ A_new.T
                 + C_new @ np.mean(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) @ C_new.T
             )
+            Q_new = (Q_new + Q_new.T)/2
+            ic(Q_new)
         else:
             A_new = matmul_inv(np.mean(M_1, axis=0), np.mean(M_0[:-1], axis=0))
 
