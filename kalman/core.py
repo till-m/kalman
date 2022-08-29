@@ -1,7 +1,7 @@
 from warnings import warn
 import numpy as np
 import copy
-from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step, matmul_inv
+from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, predict_step, smooth_step, matmul_inv
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
@@ -20,7 +20,7 @@ class KalmanModel():
         self.d = self.params.mu.size
         self.k = X.shape[-1]
 
-        self._has_control = params.C is not None
+        self._has_control = params.C is not None and U is not None
 
         self.calculate_filter_cov = True
         self.calculate_smooth_cov = True
@@ -205,7 +205,6 @@ class KalmanModel():
                     u=self.U[t] if self._has_control else None,
                     C=self.params.C
                 )
-                assert is_sym(P_t_tau[-t - 1])
             else:
                 y_t_tau[-t - 1], J[-t] = smooth_step(
                     y_t_tau[-t],
@@ -228,6 +227,55 @@ class KalmanModel():
         self.J = J
 
         return y_t_tau, P_t_tau, J
+
+    def forecast(self, t_end, estimate_covs=False):
+        y_t_tau_pr = np.empty((t_end, self.params.latent_dim))
+        P_t_tau_pr = np.empty((
+            t_end,
+            self.params.latent_dim,
+            self.params.latent_dim
+        ))
+
+        X_t_tau_pr = np.empty((t_end, self.k))
+        X_cov_t_tau_pr = np.empty((t_end, self.k, self.k))
+
+        self.filter()
+        self.smooth()
+        
+
+        y_t_tau_pr[:self.tau] = self.y_t_tau
+        P_t_tau_pr[:self.tau] = self.P_t_tau
+
+        X_t_tau_pr[:self.tau] = self.X
+
+        t_start = len(self.y_t_tau)
+
+        for i in range(t_start, t_end):
+            if estimate_covs:
+                y_t_tau_pr[i], P_t_tau_pr[i], X_t_tau_pr[i], X_cov_t_tau_pr[i] = predict_step(
+                    y_t_tau_pr[i-1],
+                    self.params.A,
+                    self.params.B,
+                    estimate_covs=True,
+                    P_est_prev=P_t_tau_pr[i-1],
+                    Q=self.params.Q,
+                    R=self.params.R,
+                    u=self.U[i-1] if self.U is not None else None,
+                    C=self.params.C
+                    )
+            else:
+                y_t_tau_pr[i], X_t_tau_pr[i] = predict_step(
+                    y_t_tau_pr[i-1],
+                    self.params.A,
+                    self.params.B,
+                    u=self.U[i-1] if self.U is not None else None,
+                    estimate_covs=False
+                    )
+
+        if estimate_covs:
+            return y_t_tau_pr, P_t_tau_pr, X_t_tau_pr, X_cov_t_tau_pr
+
+        return y_t_tau_pr, X_t_tau_pr
 
     def lag_one_covar_smoother(self):
         """Estimate the lag one covariance smoother.
@@ -297,15 +345,25 @@ class KalmanModel():
                 np.mean(M_0[:-1], axis=0))
 
             # Sum of means is more stable than mean of sums
+            #Q_new = (
+            #    np.mean(M_0[1:], axis=0)
+            #    - (C_new @ np.mean(N_0, axis=0)).T
+            #    - A_new @ np.mean(M_1, axis=0).T
+            #    + A_new @ (C_new @ np.mean(N_1, axis=0)).T
+            #    - C_new @ np.mean(N_0, axis=0)
+            #    + C_new @ np.mean(N_1, axis=0) @ A_new.T
+            #    + C_new @ np.mean(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) @ C_new.T
+            #)
             Q_new = (
                 np.mean(M_0[1:], axis=0)
-                - (C_new @ np.mean(N_0, axis=0)).T
+                - 2*(C_new @ np.mean(N_0, axis=0)).T
                 - A_new @ np.mean(M_1, axis=0).T
-                + A_new @ (C_new @ np.mean(N_1, axis=0)).T
-                - C_new @ np.mean(N_0, axis=0)
-                + C_new @ np.mean(N_1, axis=0) @ A_new
+                #+ A_new @ (C_new @ np.mean(N_1, axis=0)).T
+                #- C_new @ np.mean(N_0, axis=0)
+                + 2* C_new @ np.mean(N_1, axis=0) @ A_new.T
                 + C_new @ np.mean(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) @ C_new.T
             )
+            Q_new = (Q_new + Q_new.T)/2
         else:
             A_new = matmul_inv(np.mean(M_1, axis=0), np.mean(M_0[:-1], axis=0))
 

@@ -17,7 +17,7 @@ def multivar_normal_loglikelihood(X, X_est, X_est_cov):
         if np.isinf(p_i):
             inf_counter += 1
             continue
-        res += np.log(multivariate_normal(mean=X_est[t], cov=X_est_cov_).pdf(X[t]))
+        res += p_i
     if inf_counter:
         print(f"Encountered {inf_counter} inf values " +
               f"(that is {(inf_counter/X.shape[0]*100):.2f}%). " +

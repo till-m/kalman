@@ -64,6 +64,58 @@ def test_check_X_dims():
         kalmod.set_params(X.squeeze(), params)
 
 
+def test_forecast_dynamic_series_single():
+    X, params = example9_params()
+
+    n_train = 1
+
+    kalmod = kalman.KalmanModel()
+    X_train = X[:n_train]
+    kalmod.set_params(X_train, params)
+    y_t_tau_pr, P_t_tau_pr, X_t_tau_pr, X_cov_t_tau_pr = kalmod.forecast(len(X), estimate_covs=True)
+
+    kalmod2 = kalman.KalmanModel()
+    kalmod2.set_params(X, params)
+    y_t_t , P_t_t, _, _, _ = kalmod2.filter()
+
+    assert X[n_train:].flatten() == approx(
+        X_t_tau_pr[n_train:].flatten(),
+        abs=np.max(np.einsum('...ii->...i', X_cov_t_tau_pr[n_train:]))
+    )
+
+    print(y_t_tau_pr)
+    assert y_t_tau_pr[n_train:] == approx(
+            y_t_t[n_train:], np.max(np.einsum('...ii->...i', P_t_tau_pr[n_train:])) + 
+                np.max(np.einsum('...ii->...i', P_t_t[n_train:]))
+        )
+
+
+def test_forecast_dynamic_series_multiple():
+    X, params = example9_params()
+
+    n_train = 20
+
+    kalmod = kalman.KalmanModel()
+    X_train = X[:n_train]
+    kalmod.set_params(X_train, params)
+    y_t_tau_pr, P_t_tau_pr, X_t_tau_pr, X_cov_t_tau_pr = kalmod.forecast(len(X), estimate_covs=True)
+
+    kalmod2 = kalman.KalmanModel()
+    kalmod2.set_params(X, params)
+    y_t_t , P_t_t, _, _, _ = kalmod2.filter()
+
+    assert X[n_train:].flatten() == approx(
+        X_t_tau_pr[n_train:].flatten(),
+        abs=np.max(np.einsum('...ii->...i', X_cov_t_tau_pr[n_train:]))
+    )
+
+    print(y_t_tau_pr)
+    assert y_t_tau_pr[n_train:] == approx(
+            y_t_t[n_train:], np.max(np.einsum('...ii->...i', P_t_tau_pr[n_train:])) + 
+                np.max(np.einsum('...ii->...i', P_t_t[n_train:]))
+        )
+
+
 def test_parameter_estimation_static():
     X, params = example5_params()
 
