@@ -254,4 +254,3 @@ def test_parameter_estimation_dynamic_loglikelihood():
     kalmod2.fit(n_it=100)
 
     assert kalmod1.loglikelihood() <= kalmod2.loglikelihood()
-    raise RuntimeError

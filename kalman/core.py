@@ -1,7 +1,7 @@
 from warnings import warn
 import numpy as np
 import copy
-from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, smooth_step, matmul_inv
+from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, predict_step, smooth_step, matmul_inv
 from icecream import ic
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
@@ -228,6 +228,65 @@ class KalmanModel():
         self.J = J
 
         return y_t_tau, P_t_tau, J
+
+    def forecast(self, t_end, U=None, y_0=None, Sigma_0=None, estimate_covs=False):
+        if (y_0 is None) != (Sigma_0 is None):
+            raise RuntimeError("Invalid combination of arguments.")
+
+        y_t_tau_pr = np.empty((t_end, self.params.latent_dim))
+        P_t_tau_pr = np.empty((
+            t_end,
+            self.params.latent_dim,
+            self.params.latent_dim
+        ))
+
+        X_t_tau_pr = np.empty((t_end, self.k))
+        X_cov_t_tau_pr = np.empty((t_end, self.k, self.k))
+
+        if y_0 is None:
+            self.filter()
+            self.smooth()
+            
+
+            y_t_tau_pr[:self.tau] = self.y_t_tau
+            P_t_tau_pr[:self.tau] = self.P_t_tau
+
+            X_t_tau_pr[:self.tau] = self.X
+
+            t_start = len(self.y_t_tau)
+        else:
+            y_t_tau_pr[0] = y_0
+            P_t_tau_pr[0] = Sigma_0
+
+            X_t_tau_pr[0] = self.params.B @ y_0
+            t_start = 1
+
+        for i in range(t_start, t_end):
+            if estimate_covs:
+                y_t_tau_pr[i], P_t_tau_pr[i], X_t_tau_pr[i], X_cov_t_tau_pr[i] = predict_step(
+                    y_t_tau_pr[i-1],
+                    self.params.A,
+                    self.params.B,
+                    estimate_covs=True,
+                    P_est_prev=P_t_tau_pr[i-1],
+                    Q=self.params.Q,
+                    R=self.params.R,
+                    u=U[i-1] if U is not None else None,
+                    C=self.params.C
+                    )
+            else:
+                y_t_tau_pr[i], X_t_tau_pr[i] = predict_step(
+                    y_t_tau_pr[i-1],
+                    self.params.A,
+                    self.params.B,
+                    u=U[i-1] if U is not None else None,
+                    estimate_covs=False
+                    )
+
+        if estimate_covs:
+            return y_t_tau_pr, P_t_tau_pr, X_t_tau_pr, X_cov_t_tau_pr
+
+        return y_t_tau_pr, X_t_tau_pr
 
     def lag_one_covar_smoother(self):
         """Estimate the lag one covariance smoother.
