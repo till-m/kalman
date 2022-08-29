@@ -2,7 +2,6 @@ from warnings import warn
 import numpy as np
 import copy
 from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, predict_step, smooth_step, matmul_inv
-from icecream import ic
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
@@ -365,7 +364,6 @@ class KalmanModel():
                 + C_new @ np.mean(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) @ C_new.T
             )
             Q_new = (Q_new + Q_new.T)/2
-            ic(Q_new)
         else:
             A_new = matmul_inv(np.mean(M_1, axis=0), np.mean(M_0[:-1], axis=0))
 
