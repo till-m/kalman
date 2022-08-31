@@ -2,8 +2,7 @@ import numpy as np
 from scipy.stats import multivariate_normal
 from warnings import warn
 
-
-is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
+is_sym = lambda a: True if len(a.shape) == 1 else np.allclose(a, np.swapaxes(a, -1, -2))
 
 
 def multivar_normal_loglikelihood(X, X_est, X_est_cov):
@@ -30,6 +29,20 @@ def matmul_inv(P, Q):
     """
     r = np.linalg.solve(Q.T, P.T)
     return r.T
+
+
+def bilinear_einsum(P, Q):
+    """ Calculates P @ Q @ P.T in a numerically stable manner.
+    """
+    if (len(P.shape) == 1):
+        return np.einsum('j,...jk,k->...', P, Q, P.T)
+    return np.einsum('...ij,...jk,...kl->...il', P, Q, P.T)
+
+
+def bilinear_einsum_vector(P, Q):
+    """ Calculates P @ Q @ P.T in a numerically stable manner.
+    """
+    return np.einsum('j,...jk,k->...', P, Q, P.T)
 
 
 def verify_control(u, C):
@@ -229,13 +242,15 @@ def filter_step(x,
     if has_control:
         y_pred += C @ u
     if estimate_covs:
-        y_pred_cov = A @ P_est_prev @ A.T + Q
+        y_pred_cov = bilinear_einsum(A, P_est_prev) + Q
+        y_pred_cov = (y_pred_cov + y_pred_cov.T) / 2
 
-    kalman_gain = y_pred_cov @ matmul_inv(B.T, R + B @ y_pred_cov @ B.T)
+    kalman_gain = y_pred_cov @ matmul_inv(B.T, R + bilinear_einsum(B, y_pred_cov))
     T = (np.eye(kalman_gain.shape[0]) - kalman_gain @ B)
 
     if estimate_covs:
-        y_est_cov = T @ y_pred_cov @ T.T + kalman_gain @ R @ kalman_gain.T
+        y_est_cov = bilinear_einsum(T, y_pred_cov) + bilinear_einsum(kalman_gain, R)
+        y_est_cov = (y_est_cov + y_est_cov.T) / 2
 
     y_est = y_pred + kalman_gain @ (x - B @ y_pred)
 
@@ -266,8 +281,8 @@ def predict_step(y_est_prev,
     x_pred = B @ y_pred
 
     if estimate_covs:
-        y_pred_cov = A @ P_est_prev @ A.T + Q
-        x_pred_cov = B @ y_pred_cov @ B.T + R
+        y_pred_cov = bilinear_einsum(A, P_est_prev) + Q
+        x_pred_cov = bilinear_einsum(B, y_pred_cov) + R
         return y_pred, y_pred_cov, x_pred, x_pred_cov
     return y_pred, x_pred
 
@@ -279,9 +294,7 @@ def smooth_step(y_t_tau_prev,
                 y_est_prev,
                 P_est_prev,
                 A,
-                estimate_covs=True,
-                u=None,
-                C=None):
+                estimate_covs=True):
     """
     Performs one Kalman smoothing step.
 
@@ -295,7 +308,7 @@ def smooth_step(y_t_tau_prev,
         P_t_tau_prev: The corresponding covariance.
 
         y_pred: The predicted value of y at time t based on the measurements
-            up-to and including t-1. 
+            up-to and including t-1.
 
         y_pred_cov: The corresponding covariance.
 
@@ -316,13 +329,16 @@ def smooth_step(y_t_tau_prev,
 
         P_t_tau_prev: If estimate_cov, the corresponding covariance.
     """
-    has_control = verify_control(u, C)
+    y_t_tau_prev = np.atleast_1d(y_t_tau_prev)
+    y_pred = np.atleast_1d(y_pred)
+    y_est_prev = np.atleast_1d(y_est_prev)
+
+    y_pred_cov = np.atleast_2d(y_pred_cov)
+    P_t_tau_prev = np.atleast_2d(P_t_tau_prev)
 
     J = P_est_prev @ matmul_inv(A.T, y_pred_cov)
 
     y_t_tau = (y_est_prev + J @ (y_t_tau_prev - y_pred))
-    if has_control:
-        y_t_tau = y_t_tau - C @ u
 
     if estimate_covs:
         y_t_tau_cov = (P_est_prev + J @ (P_t_tau_prev - y_pred_cov) @ J.T)
