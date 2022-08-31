@@ -151,55 +151,6 @@ def test_filter_step_control():
         ]) == approx(P_est_hat[-1], rel=0.1)
 
 
-def test_smooth_step_static_no_noise():
-    X, U, params = example10_params()
-
-    y = params.mu  # initial estimate
-    P = params.Sigma  # initial variance estimate
-
-    y_t_t = []
-    P_t_t = []
-
-    y_t_t1 = []
-    P_t_t1 = []
-
-    # filter
-    for i in range(len(X)):
-        y_pred, y_pred_cov, _, y, P = kalman.filter_step(
-            X[i], y, P, params.A, params.Q, params.B, params.R, u=U[i], C=params.C)
-        y_t_t.append(y[0])
-        P_t_t.append(P[0])
-
-        y_t_t1.append(y_pred)
-        P_t_t1.append(y_pred_cov)
-
-    y_est_hat = []
-    P_est_hat = []
-
-    y_t_tau = y_t_t[-1]
-    y_t_tau_cov = P_t_t[-1]
-
-    # smooth
-    for i in range(len(X) - 1):
-        y_t_tau, y_t_tau_cov, _ = kalman.smooth_step(y_t_tau,
-                                                     y_t_tau_cov,
-                                                     y_t_t1[-i - 2],
-                                                     P_t_t1[-i - 2],
-                                                     y_t_t[-i - 1],
-                                                     P_t_t[-i - 1],
-                                                     params.A,
-                                                     u=U[-i -1],
-                                                     C=params.C)
-        y_est_hat.insert(0, y_t_tau)
-        P_est_hat.insert(0, y_t_tau_cov)
-
-    y_est_hat = np.array(y_est_hat)
-    P_est_hat = np.array(P_est_hat)
-
-    # 1x1 covariance matrices so no determinant needed
-    assert (P_est_hat <= P_t_t[:-1]).all()
-
-
 def test_filter_control():
     X, U, params = example10_params()
 

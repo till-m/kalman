@@ -1,7 +1,7 @@
 from warnings import warn
 import numpy as np
 import copy
-from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, predict_step, smooth_step, matmul_inv
+from .primitives import multivar_normal_loglikelihood, KalmanParams, filter_step, predict_step, smooth_step, matmul_inv, bilinear_einsum
 
 is_sym = lambda a: np.allclose(a, np.swapaxes(a, -1, -2))
 
@@ -76,7 +76,7 @@ class KalmanModel():
                 self.lag_one_covar_smoother()
                 if self.verbose:
                     try:
-                        print(self.loglikelihood())
+                        print(f"Likelihood: {self.loglikelihood():.2e}")
                     except ValueError:
                         print("Calculation of loglikelihood failed.")
                         print("This is likely due to numerical inaccuracies.")
@@ -120,13 +120,13 @@ class KalmanModel():
 
         y_t_t1[0] = self.params.mu
 
-        K[0] = P_t_t1[0] @ matmul_inv(self.params.B.T, (self.params.R + self.params.B @ P_t_t1[0] @ self.params.B.T))
+        K[0] = P_t_t1[0] @ matmul_inv(self.params.B.T, (self.params.R + bilinear_einsum(self.params.B, P_t_t1[0])))
 
         # P_t^t (numerically stable version)
         T = (np.eye(K[0].shape[0]) - K[0] @ self.params.B)
 
         if self.calculate_filter_cov:
-            P_t_t[0] = T @ P_t_t1[0] @ T.T + K[0] @ self.params.R @ K[0].T
+            P_t_t[0] = bilinear_einsum(T, P_t_t1[0]) + bilinear_einsum(K[0], self.params.R)
 
         # y_hat_t^t
         y_t_t[0] = y_t_t1[0] + K[0] @ (self.X[0] - self.params.B @ y_t_t1[0])
@@ -201,9 +201,7 @@ class KalmanModel():
                     self.P_t_t1[-t],
                     self.y_t_t[-t - 1],
                     self.P_t_t[-t - 1],
-                    self.params.A,
-                    u=self.U[t] if self._has_control else None,
-                    C=self.params.C
+                    self.params.A
                 )
             else:
                 y_t_tau[-t - 1], J[-t] = smooth_step(
@@ -214,9 +212,7 @@ class KalmanModel():
                     self.y_t_t[-t - 1],
                     self.P_t_t[-t - 1],
                     self.params.A,
-                    estimate_covs=False,
-                    u=self.U[t] if self._has_control else None,
-                    C=self.params.C
+                    estimate_covs=False
                 )
 
         self.y_t_tau = y_t_tau
@@ -241,7 +237,6 @@ class KalmanModel():
 
         self.filter()
         self.smooth()
-        
 
         y_t_tau_pr[:self.tau] = self.y_t_tau
         P_t_tau_pr[:self.tau] = self.P_t_tau
@@ -361,7 +356,7 @@ class KalmanModel():
                 #+ A_new @ (C_new @ np.mean(N_1, axis=0)).T
                 #- C_new @ np.mean(N_0, axis=0)
                 + 2* C_new @ np.mean(N_1, axis=0) @ A_new.T
-                + C_new @ np.mean(np.einsum('...i,...j->...ij', self.U, self.U), axis=0) @ C_new.T
+                + bilinear_einsum(C_new, np.mean(np.einsum('...i,...j->...ij', self.U, self.U), axis=0))
             )
             Q_new = (Q_new + Q_new.T)/2
         else:
@@ -388,7 +383,7 @@ class KalmanModel():
         self.params.R = R_new
         if self.has_control:
             self.params.C = C_new
-
+        
         self.calculate_filter_cov = True
         self.calculate_smooth_cov = True
 
@@ -401,8 +396,8 @@ class KalmanModel():
         x_hat_01 = self.params.B @ self.params.mu
         x_hat_1 = np.einsum('ij,...j->...i', self.params.B, self.y_t_t1[1:])
         if calculate_cov:
-            H_1 = self.params.R + self.params.B @ np.einsum('...ij,jk->...ik', self.P_t_t1[1:], self.params.B.T)
-            H_01 = self.params.R + self.params.B @ self.params.Sigma @ self.params.B.T
+            H_1 = self.params.R + bilinear_einsum(self.params.B, self.P_t_t1[1:])
+            H_01 = self.params.R + bilinear_einsum(self.params.B, self.params.Sigma)
             
             return (np.vstack((np.array([x_hat_01]), x_hat_1)),
                     np.vstack((np.array([H_01]), H_1)))
