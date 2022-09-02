@@ -142,7 +142,7 @@ class KalmanParams():
                     f"Dimension mismatch between mu and C." +
                     f"Expected C to have length {self._latent_dim} " +
                     f"along axis 0, not {kwargs['C'].shape[0]}")
-        except KeyError:
+        except (KeyError, AttributeError):
             pass
 
     def to_dict(self):
@@ -152,7 +152,8 @@ class KalmanParams():
             'B': self.B,
             'R': self.R,
             'A': self.A,
-            'Q': self.Q
+            'Q': self.Q,
+            'C': self.C
         }
         return _dict
 

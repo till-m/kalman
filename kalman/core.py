@@ -74,6 +74,9 @@ class KalmanModel():
                 self.filter()
                 self.smooth()
                 self.lag_one_covar_smoother()
+
+                # M step
+                self.m_step()
                 if self.verbose:
                     try:
                         print(f"Likelihood: {self.loglikelihood():.2e}")
@@ -81,14 +84,12 @@ class KalmanModel():
                         print("Calculation of loglikelihood failed.")
                         print("This is likely due to numerical inaccuracies.")
 
-                # M step
-                self.m_step()
             self.filter()
             self.smooth()
             if self.verbose:
                 print(f"\n++++++++  Final estimate  +++++++++")
                 try:
-                    print(self.loglikelihood())
+                    print(f"Likelihood: {self.loglikelihood():.2e}")
                 except ValueError:
                     print("Calculation of loglikelihood failed.")
                     print("This is likely due to numerical inaccuracies.")
